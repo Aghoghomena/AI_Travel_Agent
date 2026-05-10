@@ -1,0 +1,191 @@
+[
+       {
+           "city": "Istanbul",
+           "iata": "IST",
+           "country": "Turkey",
+           "currency": "TRY",
+                "region": "europe",
+                "climate_tags": [
+                    "warm",
+                    "hot summer",
+                    "mild winter"
+                ],
+                "avg_temp_june_c": 23,
+                "avg_hotel_nightly_usd": 85,
+                "major_airports": [
+                    "IST",
+                    "SAW"
+                ],
+                "visa_requirements": {
+                    "irish": "visa on arrival",
+                    "nigerian": "e-visa required",
+                    "canadian": "visa on arrival"
+            },
+            "notes": "Often cheapest hub for Europe-Africa-Americas groups"
+        },
+        {
+            "city": "Lisbon",
+            "iata": "LIS",
+            "country": "Portugal",
+            "currency": "EUR",
+            "region": "europe",
+            "climate_tags": [
+                "warm",
+                "sunny",
+                "mild"
+            ],
+            "avg_temp_june_c": 26,
+            "avg_hotel_nightly_usd": 110,
+            "major_airports": [
+                "LIS"
+            ],
+            "visa_requirements": {
+                "irish": "no visa required",
+                "nigerian": "schengen visa required",
+                "canadian": "no visa required"
+            },
+            "notes": "Affordable European city, good Lagos and Dublin routes"
+        },
+        {
+            "city": "Dubai",
+            "iata": "DXB",
+            "country": "UAE",
+            "currency": "AED",
+            "region": "middle east",
+            "climate_tags": [
+                "hot",
+                "sunny",
+                "desert"
+            ],
+            "avg_temp_june_c": 36,
+            "avg_hotel_nightly_usd": 120,
+            "major_airports": [
+                "DXB",
+                "DWC"
+            ],
+            "visa_requirements": {
+                "irish": "visa on arrival",
+                "nigerian": "visa required",
+                "canadian": "visa on arrival"
+            },
+            "notes": "Major hub, strong long-haul connections"
+        },
+        {
+            "city": "Amsterdam",
+            "iata": "AMS",
+            "country": "Netherlands",
+            "currency": "EUR",
+            "region": "europe",
+            "climate_tags": [
+                "mild",
+                "cool",
+                "rainy"
+            ],
+            "avg_temp_june_c": 18,
+            "avg_hotel_nightly_usd": 130,
+            "major_airports": [
+                "AMS"
+            ],
+            "visa_requirements": {
+                "irish": "no visa required",
+                "nigerian": "schengen visa required",
+                "canadian": "no visa required"
+            },
+            "notes": "Strong European hub, high accommodation costs"
+        },
+        {
+            "city": "London",
+            "iata": "LHR",
+            "country": "UK",
+            "currency": "GBP",
+            "region": "europe",
+            "climate_tags": [
+                "mild",
+                "cloudy",
+                "rainy"
+            ],
+            "avg_temp_june_c": 18,
+            "avg_hotel_nightly_usd": 180,
+            "major_airports": [
+                "LHR",
+                "LGW",
+                "STN"
+            ],
+            "visa_requirements": {
+                "irish": "no visa required",
+                "nigerian": "uk visa required",
+                "canadian": "no visa required"
+            },
+            "notes": "Major hub but expensive accommodation"
+        },
+        {
+            "city": "Nairobi",
+            "iata": "NBO",
+            "country": "Kenya",
+            "currency": "KES",
+            "region": "africa",
+            "climate_tags": [
+                "mild",
+                "warm",
+                "dry season june"
+            ],
+            "avg_temp_june_c": 19,
+            "avg_hotel_nightly_usd": 70,
+            "major_airports": [
+                "NBO"
+            ],
+            "visa_requirements": {
+                "irish": "e-visa required",
+                "nigerian": "e-visa required",
+                "canadian": "e-visa required"
+            },
+            "notes": "Affordable African hub, good east Africa gateway"
+        },
+        {
+            "city": "Singapore",
+            "iata": "SIN",
+            "country": "Singapore",
+            "currency": "SGD",
+            "region": "southeast asia",
+            "climate_tags": [
+                "hot",
+                "humid",
+                "tropical"
+            ],
+            "avg_temp_june_c": 30,
+            "avg_hotel_nightly_usd": 150,
+            "major_airports": [
+                "SIN"
+            ],
+            "visa_requirements": {
+                "irish": "no visa required",
+                "nigerian": "visa required",
+                "canadian": "no visa required"
+            },
+            "notes": "Premium Asian hub, excellent connections"
+        },
+        {
+            "city": "Accra",
+            "iata": "ACC",
+            "country": "Ghana",
+            "currency": "GHS",
+            "region": "africa",
+            "climate_tags": [
+                "hot",
+                "humid",
+                "tropical"
+            ],
+            "avg_temp_june_c": 27,
+            "avg_hotel_nightly_usd": 65,
+            "major_airports": [
+                "ACC"
+            ],
+            "visa_requirements": {
+                "irish": "visa on arrival",
+                "nigerian": "ecowas no visa",
+                "canadian": "visa on arrival"
+            },
+            "notes": "West African hub, affordable accommodation"
+        }
+
+    ]

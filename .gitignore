@@ -31,3 +31,16 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# pictures
+data/pictures/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.ico
+*.webp
+*.tiff
+*.tif

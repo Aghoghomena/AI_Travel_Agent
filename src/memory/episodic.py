@@ -60,7 +60,7 @@ class EpisodicMemory:
         """, (
             result.origin_iata,
             result.destination_iata,
-            result.fetched_at.split("T")[0],  # Store only date for caching
+            result.outbound_date,
             result.price_local,
             result.currency,
             result.price_usd,

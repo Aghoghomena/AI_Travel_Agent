@@ -237,3 +237,115 @@ def create_initial_state(
         # Errors
         "errors": [],
     }
+
+
+# ── Internal state for the elicitation agent's graph ────────────────────
+class ElicitationState(dict):
+    user_message: str
+    raw_llm_output: str | None
+    parsed_output: dict | None
+    retry_count: int
+    turn_count: int
+    error: str | None
+    query_state: QueryState
+    elicitation_question: str | None
+    elicitation_complete: bool
+    turn_limit_reached: bool
+    corrections: list[str]
+    conversation_history: list[dict]
+
+
+ 
+# ── Internal state for this agent's graph ────────────────────
+class TravellerState(dict):
+    traveller: Traveller
+    candidate_destinations: list[str]       # IATA codes
+    outbound_date: str
+    flight_results: list[FlightResult]
+    iata_resolution_error: str | None
+    search_errors: list[str]
+    travel_month: str | None                # e.g. 'June' — used if no exact date
+    episodic_memory: object | None          # EpisodicMemory instance (Step 11)
+ 
+
+ # ── Internal state for this agent's graph ────────────────────
+class AccommodationState(dict):
+    candidate_destinations: list[str]       # IATA codes
+    duration_nights: int
+    accommodation_results: list[AccommodationResult]
+    episodic_memory: object | None
+
+
+# ── Per-traveller cost breakdown ──────────────────────────────
+@dataclass
+class TravellerCost:
+    """Cost breakdown for one traveller at one destination."""
+    traveller_name: str
+    origin_iata: str
+    currency: str
+    flight_usd: float
+    accommodation_share_usd: float
+    total_usd: float
+    total_local: float
+    exchange_rate: float
+
+
+# ── Internal state for this agent's graph ────────────────────
+class ActivitiesState(dict):
+    destination_iatas: list[str]
+    activities: dict[str, list[Activity]]   # iata → activities
+    semantic_memory: object | None          # SemanticMemory (Step 11)
+    errors: list[str]
+
+
+# ── Internal state for this agent's graph ────────────────────
+class RankerState(dict):
+    destination_results: list
+    raw_llm_output: str | None
+    parsed_ranking: list[dict] | None
+    retry_count: int
+    error: str | None
+    ranked_destinations: list
+
+# ── Internal states for memory agent ───────────────────────────────────────────
+
+class MemoryReadState(dict):
+    query_state: QueryState
+    session_id: str
+    cache_hit: bool
+    cached_result: dict | None
+    prioritised_destinations: list[str]
+    past_searches_summary: str | None
+    errors: list[str]
+ 
+ 
+class MemoryWriteState(dict):
+    query_state: QueryState
+    session_id: str
+    ranked_destinations: list
+    flight_results: list
+    accommodation_results: list
+    exchange_rates: dict
+    hitl_checkpoint_1: object | None
+    hitl_checkpoint_2: object | None
+    errors: list[str]
+
+
+
+# ── Internal state ────────────────────────────────────────────
+class OrchestratorState(dict):
+    query_state: QueryState
+    semantic_memory: object
+    episodic_memory: object
+    prioritised_destinations: list[str]
+    rewoo_plan: str | None
+    rewoo_plan_valid: bool
+    replan_count: int
+    candidate_destinations: list[str]      # IATA codes
+    destination_results: list[DestinationResult]
+    flight_results: list
+    accommodation_results: list
+    exchange_rates: dict
+    ranked_destinations: list
+    errors: list[str]
+ 

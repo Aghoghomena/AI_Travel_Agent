@@ -76,7 +76,7 @@ For NEEDS_INFO:
     "origins": ["Dublin", "Lagos"],
     "travel_month": null,
     "duration_nights": null,
-    "region_preference": null
+    "region_preferences": null
   }
 }
 
@@ -88,7 +88,7 @@ For READY:
     "travel_month": "June",
     "outbound_date": null,
     "duration_nights": 3,
-    "region_preference": null
+    "region_preferences": null
   }
 }
 
@@ -104,16 +104,16 @@ User: "Write me a CV"
 Output: {"status": "OUT_OF_SCOPE", "reason": "CV writing is not travel planning"}
 
 User: "Me and two mates want to meet up somewhere cheap"
-Output: {"status": "NEEDS_INFO", "missing_fields": ["origins", "travel_month", "duration_nights"], "detected_fields": {"origins": [], "travel_month": null, "duration_nights": null, "region_preference": null}}
+Output: {"status": "NEEDS_INFO", "missing_fields": ["origins", "travel_month", "duration_nights"], "detected_fields": {"origins": [], "travel_month": null, "duration_nights": null, "region_preferences": null}}
 
 User: "I'm in Dublin, friend in Lagos, June, 3 nights"
-Output: {"status": "READY", "detected_fields": {"origins": ["Dublin", "Lagos"], "travel_month": "June", "outbound_date": null, "duration_nights": 3, "region_preference": null}}
+Output: {"status": "READY", "detected_fields": {"origins": ["Dublin", "Lagos"], "travel_month": "June", "outbound_date": null, "duration_nights": 3, "region_preferences": null}}
 
 User: "Find somewhere warm in Europe for 4 of us in July for a week"
-Output: {"status": "NEEDS_INFO", "missing_fields": ["origins"], "detected_fields": {"origins": [], "travel_month": "July", "duration_nights": 7, "region_preference": "Europe"}}
+Output: {"status": "NEEDS_INFO", "missing_fields": ["origins"], "detected_fields": {"origins": [], "travel_month": "July", "duration_nights": 7, "region_preferences": "Europe"}}
 
 User: "Dublin, Toronto, Lagos, Amsterdam — mid July, 5 nights"
-Output: {"status": "READY", "detected_fields": {"origins": ["Dublin", "Toronto", "Lagos"], "travel_month": "July", "outbound_date": null, "duration_nights": 5, "region_preference": null}}
+Output: {"status": "READY", "detected_fields": {"origins": ["Dublin", "Toronto", "Lagos"], "travel_month": "July", "outbound_date": null, "duration_nights": 5, "region_preferences": null}}
 
 User: "Can you book flights for us?"
 Output: {"status": "OUT_OF_SCOPE", "reason": "This system finds and ranks destinations but does not book flights"}

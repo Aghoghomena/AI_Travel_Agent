@@ -11,28 +11,62 @@ Three search modes depending on what information is available:
 """
 
 import os
-from datetime import datetime
-from amadeus import Client, ResponseError
+from datetime import datetime, timedelta
 from src.state import FlightResult
-from data.iata import IATA_MAP, resolve_iata, MONTH_MAP
+from data.iata import IATA_MAP, resolve_iata, MONTH_MAP, REGIONS, COUNTRY_TO_CONTINENT
+import requests
+import http.client
+import json
+from collections import defaultdict
 
-def get_amadeus_client() -> Client:
-    """Returns an authenticated Amadeus client using env vars."""
-    return Client(
-        client_id=os.environ["AMADEUS_CLIENT_ID"],
-        client_secret=os.environ["AMADEUS_CLIENT_SECRET"],
-        hostname=os.environ.get("AMADEUS_HOSTNAME", "test"),
-    )
+from dotenv import load_dotenv
+load_dotenv()
 
-def get_amadeus_client() -> Client:
-    """Returns an authenticated Amadeus client using env vars."""
-    return Client(
-        client_id=os.environ["AMADEUS_CLIENT_ID"],
-        client_secret=os.environ["AMADEUS_CLIENT_SECRET"],
-        hostname=os.environ.get("AMADEUS_HOSTNAME", "test"),
-    )
+API_KEY = os.getenv("SEARCH_API_KEY")
+API_KEY2 = os.getenv("GOOGLE_KNOWLEDGE_API_KEY")
+BASE_URL = "https://www.searchapi.io/api/v1/search"
 
-def resolve_date(travel_month: str | None, outbound_date: str | None) -> tuple[str | None, str | None]:
+
+def normalize_destination(data, origin_iata: str, region: str | None = None, destination_country: str |None = None):
+    results = []
+
+    destinations = data.get("destinations", [])
+
+    region_continent = region.title() if region else None
+
+    for destination in destinations:
+
+        if not destination.get("flight"):
+            continue
+
+        if region_continent and COUNTRY_TO_CONTINENT.get(destination.get("country")) != region_continent:
+            continue
+
+        if destination_country and destination.get("country") != destination_country:
+            continue
+
+         # collect both dates
+        dates = [destination.get("outbound_date")]
+
+        if destination.get("alternative_outbound_date"):
+            dates.append(destination.get("alternative_outbound_date"))
+
+
+        results.append({
+            "origin_iata": origin_iata,
+            "country": destination["country"],
+            "destination_iata": destination["primary_airport"],
+            "price_usd": destination["flight"]["price"],
+            "avg_cost_per_night": destination.get("avg_cost_per_night", 0),
+            "Outbound_flights": dates,
+            "fetched_at": datetime.now()
+
+        })
+
+    return results
+
+
+def resolve_start_date(travel_month: str | None = None, outbound_date: str | None = None) -> str:
     """
     Resolves travel time inputs to (exact_date, month_only).
  
@@ -44,10 +78,10 @@ def resolve_date(travel_month: str | None, outbound_date: str | None) -> tuple[s
     """
     # Already have an exact date
     if outbound_date:
-        return outbound_date, None
+        return outbound_date
  
     # Have a month name — resolve to mid-month default
-    if travel_month:
+    elif travel_month:
         month_lower = travel_month.lower().strip()
         month_num = MONTH_MAP.get(month_lower)
         if month_num:
@@ -55,224 +89,224 @@ def resolve_date(travel_month: str | None, outbound_date: str | None) -> tuple[s
             # If month already passed this year, use next year
             if month_num < datetime.now().month:
                 year += 1
-            mid_day = 15
-            return f"{year}-{month_num:02d}-{mid_day}", f"{year}-{month_num:02d}"
+            start_date = "01"
+            return f"{year}-{month_num:02d}-{start_date}"
+    
+    else:
+        return datetime.now().strftime("%Y-%m-%d")
  
-    return None, None
 
-
-# ── Search functions ──────────────────────────────────────────
-
-def search_flights_specific(origin_iata: str,destination_iata: str,departure_date: str,adults: int = 1,) -> FlightResult | None:
+def resolve_end_date(travel_month: str | None = None, outbound_date: str | None = None, duration_nights: str | None = None) -> str:
     """
-    Search 1: Specific origin + destination + exact date.
-    Returns cheapest one-way fare for that leg.
-    """
-    client = get_amadeus_client()
- 
-    try:
-        response = client.shopping.flight_offers_search.get(
-            originLocationCode=origin_iata,
-            destinationLocationCode=destination_iata,
-            departureDate=departure_date,
-            adults=str(adults),
-            max=5,
-        )
-    except ResponseError as e:
-        print(f"[amadeus] ResponseError {origin_iata}→{destination_iata} on {departure_date}: {e}")
-        return None
- 
-    offers = response.data
-    if not offers:
-        return None
- 
-    cheapest = offers[0]
-    price = float(cheapest["price"]["grandTotal"])
-    currency = cheapest["price"]["currency"]
- 
-    return FlightResult(
-        origin_iata=origin_iata,
-        destination_iata=destination_iata,
-        outbound_date=departure_date,
-        price_local=price,
-        currency=currency,
-        price_usd=None,
-        fetched_at=datetime.utcnow().isoformat(),
-        from_cache=False,
-    )
-
-def search_flights_flexible_date(origin_iata: str,destination_iata: str,travel_month: str,adults: int = 1,) -> FlightResult | None:
-    """
-    Search 2: Specific origin + destination, month only (no exact date).
-    Uses flight_dates to find cheapest date in the month, then
-    calls search_flights_specific for that date.
-    """
-    client = get_amadeus_client()
- 
-    # Resolve month to YYYY-MM
-    _, month_str = resolve_date(travel_month, None)
-    if not month_str:
-        return None
- 
-    try:
-        response = client.shopping.flight_dates.get(
-            origin=origin_iata,
-            destination=destination_iata,
-        )
-    except ResponseError as e:
-        print(f"[amadeus] flight_dates error {origin_iata}→{destination_iata}: {e}")
-        # Fall back to mid-month default
-        exact_date, _ = resolve_date(travel_month, None)
-        if exact_date:
-            return search_flights_specific(origin_iata, destination_iata, exact_date, adults)
-        return None
- 
-    # Filter results to the target month and pick cheapest
-    target_month = month_str  # YYYY-MM
-    best_date = None
-    best_price = float("inf")
- 
-    for item in response.data:
-        dep_date = item.get("departureDate", "")
-        if dep_date.startswith(target_month):
-            price = float(item.get("price", {}).get("total", float("inf")))
-            if price < best_price:
-                best_price = price
-                best_date = dep_date
- 
-    if not best_date:
-        # No results in that month — fall back to mid-month
-        exact_date, _ = resolve_date(travel_month, None)
-        if exact_date:
-            return search_flights_specific(origin_iata, destination_iata, exact_date, adults)
-        return None
- 
-    return search_flights_specific(origin_iata, destination_iata, best_date, adults)
-
-def search_flights_anywhere_with_specific_dates(origin_iata: str, departure_dates: str, candidate_destinations: list[str] | None = None,) -> list[FlightResult]:
-    """
-    Mode 3: Origin only, no destination specified.
-    Uses flight_destinations to find cheapest reachable destinations.
-    If candidate_destinations is provided, filters results to those only.
-    Returns a list of FlightResults (one per reachable destination).
-    """
-    client = get_amadeus_client()
- 
-    try:
-        response = client.shopping.flight_destinations.get(
-            origin=origin_iata,
-            departureDate=departure_dates,  # Can be YYYY-MM or YYYY-MM-DD
-        )
-    except ResponseError as e:
-        print(f"[amadeus] flight_destinations error from {origin_iata}: {e}")
-        return []
- 
-    results = []
-    for item in response.data:
-        dest = item.get("destination")
-        if not dest:
-            continue
- 
-        # Filter to candidates if provided
-        if candidate_destinations and dest not in candidate_destinations:
-            continue
- 
-        price = float(item.get("price", {}).get("total", 0))
-        currency = "USD"  # flight_destinations returns USD
-        dep_date = item.get("departureDate", datetime.utcnow().strftime("%Y-%m-%d"))
- 
-        results.append(FlightResult(
-            origin_iata=origin_iata,
-            destination_iata=dest,
-            outbound_date=departure_dates,
-            price_local=price,
-            currency=currency,
-            price_usd=price,   # already USD from this endpoint
-            fetched_at=datetime.utcnow().isoformat(),
-            from_cache=False,
-        ))
- 
-    return results
-
-# ── Unified entry point ───────────────────────────────────────
- 
-def search_flights(origin_iata: str,destination_iata: str | None,travel_month: str | None = None,outbound_date: str | None = None,candidate_destinations: list[str] | None = None,adults: int = 1,) -> list[FlightResult]:
-    """
-    Unified flight search. Picks the right Amadeus endpoint based
-    on what information is available.
- 
-    Args:
-        origin_iata: Departure airport IATA code.
-        destination_iata: Destination IATA code, or None for anywhere.
-        travel_month: Month name e.g. "June" — used if no exact date.
-        outbound_date: Exact date YYYY-MM-DD — takes priority over month.
-        candidate_destinations: Filter for anywhere search.
-        adults: Number of passengers.
+    Resolves travel time inputs to (exact_date, month_only).
  
     Returns:
-        List of FlightResult objects (empty list on failure).
+        (exact_date, month_only) where:
+        - exact_date is YYYY-MM-DD if we have a specific date
+        - month_only is YYYY-MM if we only have a month name
+        - Both None if no date info available
     """
-    # Mode 3 — anywhere
-    if not destination_iata or destination_iata.lower() == "anywhere":
-        return search_flights_anywhere(origin_iata, candidate_destinations)
- 
-    # Resolve date
-    exact_date, _ = resolve_date(travel_month, outbound_date)
- 
-    # Mode 1 — specific date
-    if exact_date:
-        result = search_flights_specific(origin_iata, destination_iata, exact_date, adults)
-        return [result] if result else []
- 
-    # Mode 2 — month only, no exact date
+    if outbound_date and duration_nights:
+        try:
+            start = datetime.strptime(outbound_date, "%Y-%m-%d")
+            end = start + timedelta(days=int(duration_nights))
+            return end.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
     if travel_month:
-        result = search_flights_flexible_date(origin_iata, destination_iata, travel_month, adults)
-        return [result] if result else []
- 
-    print(f"[amadeus] No date or month provided for {origin_iata}→{destination_iata}")
-    return []
+        month_lower = travel_month.lower().strip()
+        month_num = MONTH_MAP.get(month_lower)
+        if month_num:
+            year = datetime.now().year
+            if month_num < datetime.now().month:
+                year += 1
+            return f"{year}-{month_num:02d}-27"
+
+
+
+def search_everywhere_with_specific_date(origin_iata: str,outbound_date: str, durations_nights: str, adults: int = 1, ):
     """
-    Searches for the cheapest one-way flight on a given leg.
- 
-    Args:
-        origin_iata: 3-letter IATA code for origin airport.
-        destination_iata: 3-letter IATA code for destination airport.
-        departure_date: Date in YYYY-MM-DD format.
-        adults: Number of adult passengers (default 1).
- 
-    Returns:
-        FlightResult with the cheapest fare found, or None if no
-        results or an API error occurs.
+    Endpoint 1: Cheapest flights for a whole month using the Calendar API a week trip in the month.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR"
     """
-    client = get_amadeus_client()
+    print(outbound_date)
+    start_date = resolve_start_date("", outbound_date)
+    print(start_date)
+    end_date = resolve_end_date("", outbound_date, durations_nights)
+    print(end_date)
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "time_period": f"{start_date}..{end_date}",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    
+    response = requests.get(BASE_URL, params=params)
  
-    try:
-        response = client.shopping.flight_offers_search.get(
-            originLocationCode=origin_iata,
-            destinationLocationCode=destination_iata,
-            departureDate=departure_date,
-            adults=str(adults),
-            max=5,
-        )
-    except ResponseError as e:
-        print(f"[amadeus] ResponseError for {origin_iata}→{destination_iata}: {e}")
-        return None
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
  
-    offers = response.data
-    if not offers:
-        return None
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata)
  
-    # Offers are already sorted cheapest first by the API
-    cheapest = offers[0]
-    price = float(cheapest["price"]["grandTotal"])
-    currency = cheapest["price"]["currency"]
+    return normalized
+
+def search_everywhere_by_month(origin_iata: str,travel_month: str, adults: int = 1, ):
+    """
+    Endpoint 1: Cheapest flights for a whole month using the Calendar API a week trip in the month and a specific location.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR"
+    """
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "time_period": f"one_week_trip_in_{travel_month}",   
+        "currency": "USD",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    response = requests.get(BASE_URL, params=params)
+
  
-    return FlightResult(
-        origin_iata=origin_iata,
-        destination_iata=destination_iata,
-        price_local=price,
-        currency=currency,
-        price_usd=None,          # normalised by currency agent (Step 8)
-        fetched_at=datetime.utcnow().isoformat(),
-        from_cache=False,
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
+ 
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata)
+ 
+    return normalized
+
+def search_region_by_month(origin_iata: str,travel_month: str, travel_region: str, adults: int = 1, ):
+    """
+    Endpoint 1: Cheapest flights for a whole month using the Calendar API a week trip in the month and a specific location.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR" filter by region
+    """
+    region_kgmid = REGIONS.get(travel_region.lower())
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "arrival_id": region_kgmid,
+        "time_period": f"one_week_trip_in_{travel_month}",   
+        "currency": "USD",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    response = requests.get(BASE_URL, params=params)
+
+ 
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
+ 
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata, travel_region)
+ 
+    return normalized
+
+def search_region_with_specific_date(origin_iata: str,outbound_date: str, durations_nights: str, travel_region:str, adults: int = 1, ):
+    """
+    Endpoint 4: Cheapest flights for a whole month using the Calendar API a week trip in the month.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR"
+    """
+    print(outbound_date)
+    start_date = resolve_start_date("", outbound_date)
+    print(start_date)
+    end_date = resolve_end_date("", outbound_date, durations_nights)
+    print(end_date)
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "time_period": f"{start_date}..{end_date}",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    
+    response = requests.get(BASE_URL, params=params)
+ 
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
+ 
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata, travel_region)
+ 
+    return normalized
+
+
+def search_location_by_month(origin_iata: str,travel_month: str, destination_country: str, adults: int = 1, ):
+    """
+    Endpoint 1: Cheapest flights for a whole month using the Calendar API a week trip in the month and a specific location.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR" filter by region
+    """
+
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "time_period": f"one_week_trip_in_{travel_month}",   
+        "currency": "USD",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    response = requests.get(BASE_URL, params=params)
+
+ 
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
+ 
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata, "", destination_country)
+ 
+    return normalized
+
+def search_location_specific_date(origin_iata: str,outbound_date: str, durations_nights: str, destination_country:str, adults: int = 1, ):
+    """
+    Endpoint 4: Cheapest flights for a whole month using the Calendar API a week trip in the month.
+    origin / destination: IATA airport codes e.g. "DUB", "LHR"
+    """
+    print(outbound_date)
+    start_date = resolve_start_date("", outbound_date)
+    print(start_date)
+    end_date = resolve_end_date("", outbound_date, durations_nights)
+    print(end_date)
+    params = {
+        "engine": "google_travel_explore",
+        "departure_id": origin_iata,
+        "time_period": f"{start_date}..{end_date}",
+        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+    }
+    
+    response = requests.get(BASE_URL, params=params)
+ 
+    if response.status_code != 200:
+        print(f"Error {response.status_code}: {response.text}")
+        return
+ 
+    data = response.json()
+    normalized = normalize_destination(data, origin_iata, "", destination_country)
+ 
+    return normalized
+
+
+## --- Example Usage ---
+if __name__ == "__main__":
+    # Endpoint 1: Cheapest flights from Dublin in July 2026
+    # result =  search_region_by_month(
+    #     origin_iata="DUB",
+    #     travel_month="June",
+    #     travel_region= "Africa",
+    # )
+    # result = search_everywhere_by_month_and_region(
+    #     origin_iata="LOS",
+    #     travel_preference= "Africa",
+    #     travel_month= "June",
+    # )
+    result = search_location_specific_date(
+        origin_iata="DUB",
+        outbound_date= "2026-06-12",
+        durations_nights=4,
+        destination_country="Spain"
+
     )
+    #result = get_kgmid("Nigeria")
+    print (result)
+
+ 

@@ -30,15 +30,14 @@ def initialize_db():
             origins_key TEXT NOT NULL,
             destinations TEXT NOT NULL,
             outbound_date TEXT NOT NULL,
-            return_date TEXT NOT NULL,
+            region_preferences TEXT NOT NULL,
             duration_nights INTEGER NOT NULL,
             flights_json TEXT NOT NULL,
             accommodation_json TEXT NOT NULL,
-            activities_json TEXT NOT NULL,
             total_usd REAL NOT NULL,
-            exchange_rate REAL NOT NULL,
-            fetched_at text NOT NULL,
-            expires_at text NOT NULL
+            exchange_rates_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
         )
     """)
 

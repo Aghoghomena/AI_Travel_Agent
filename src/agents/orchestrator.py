@@ -22,54 +22,58 @@ from src.agents.ranker import run_ranker_agent
 from src.memory.semantic import SemanticMemory
 from src.state import QueryState, DestinationResult, Traveller
 from src.utils.config import llm
-from src.state import OrchestratorState
+from src.state import OrchestratorState, query_state_from_dict, query_state_to_dict
 
 # ── Tools ─────────────────────────────────────────────────────
 
-def get_candidate_destinations(semantic_memory: SemanticMemory, region_preferences: str | None, prioritised_destinations: list[str],) -> list[str]:
+def get_candidate_destinations(semantic_memory: SemanticMemory, region_preferences: str | None, prioritised_destinations: list[str], destination_locations=None, search_mode: str | None = None) -> list[str]:
     """
     Queries semantic memory for candidate destinations based on
     region preference. Reorders to put procedural winners first.
     Returns list of IATA codes.
     """
+    # Specific mode — use exactly what the user asked for, skip semantic memory
+    if search_mode == "specific" and destination_locations:
+        return destination_locations[:6]
+
     # Map region_preferences to semantic query
-    region_lower = (region_preferences or "").lower().strip()
- 
-    if region_lower in ("africa",):
-        query = "africa hub city meetup"
-        region_filter = "africa"
-    elif region_lower in ("europe",):
-        query = "europe hub city meetup"
-        region_filter = "europe"
+    if semantic_memory is None:
+        candidates = ["Turkey", "Portugal", "Netherlands", "United Kingdom", "Kenya", "Ghana"]
     else:
-        # anywhere or None — query both
-        query = "hub city international meetup affordable"
-        region_filter = None
- 
-    results = semantic_memory.query_destinations(
-        query=query,
-        region_filter=region_filter,
-        n_results=8,
-    )
- 
-    # Extract IATAs — filter out DXB and SIN (outside MVP scope)
-    out_of_scope = {"DXB", "SIN"}
-    candidates = [
-        r["iata"] for r in results
-        if r.get("iata") and r["iata"] not in out_of_scope
-    ]
- 
-    if not candidates:
-        # Fallback to default hub cities if semantic memory is empty
-        candidates = ["IST", "LIS", "AMS", "LHR", "NBO", "ACC"]
- 
-    # Reorder — put procedural winners first
+        region_lower = (region_preferences or "").lower().strip()
+
+        if region_lower in ("africa",):
+            query = "africa hub city meetup"
+            region_filter = "africa"
+        elif region_lower in ("europe",):
+            query = "europe hub city meetup"
+            region_filter = "europe"
+        else:
+            query = "hub city international meetup affordable"
+            region_filter = None
+
+        results = semantic_memory.query_destinations(
+            query=query,
+            region_filter=region_filter,
+            n_results=8,
+        )
+
+        out_of_scope = {"DXB", "SIN"}
+        candidates = [
+            r["iata"] for r in results
+            if r.get("iata") and r["iata"] not in out_of_scope
+        ]
+
+        if not candidates:
+            candidates = ["Turkey", "Portugal", "Netherlands", "United Kingdom", "Kenya", "Ghana"]
+
     if prioritised_destinations:
         winners = [d for d in prioritised_destinations if d in candidates]
         rest = [d for d in candidates if d not in winners]
         candidates = winners + rest
- 
-    return candidates[:6]  # max 6 candidates
+
+    return candidates[:6]
+    
 
 def validate_plan(plan_xml: str, travellers: list, candidates: list[str]) -> tuple[bool, str]:
     """
@@ -129,7 +133,8 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
     Node 1: Queries semantic memory for candidates, then calls
     LLM to generate the XML execution plan.
     """
-    query_state = state.get("query_state", QueryState())
+    query_state = query_state_from_dict(state.get("query_state", {}))
+    print(f"Planning Node with query_state: {query_state} in plan_node at orchestrator.py")  # Debug print
     semantic_memory = state.get("semantic_memory")
     prioritised = state.get("prioritised_destinations", [])
     errors = list(state.get("errors", []))
@@ -139,19 +144,23 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
         semantic_memory=semantic_memory,
         region_preferences=query_state.region_preferences,
         prioritised_destinations=prioritised,
+        destination_locations=query_state.destination_locations,
+        search_mode=query_state.search_mode,
     )
- 
+
     # Build and call LLM
     prompt = build_orchestrator_prompt(
         travellers=query_state.travellers,
         candidate_destinations=candidates,
         travel_month=query_state.travel_month,
         duration_nights=query_state.duration_nights,
+        search_mode=query_state.search_mode or "anywhere",
     )
  
     response = llm.invoke(prompt)
     raw = response.content.strip()
- 
+    print(f"LLM raw response for plan_node at orchestrator.py:\n{raw}\n")  # Debug print
+
     # Strip accidental markdown fences
     if raw.startswith("```"):
         parts = raw.split("```")
@@ -173,14 +182,22 @@ def validate_plan_node(state: OrchestratorState) -> OrchestratorState:
     Node 2: Validates the XML plan structure.
     """
     plan_xml = state.get("rewoo_plan", "")
-    query_state = state.get("query_state", QueryState())
- 
+    query_state = query_state_from_dict(state.get("query_state", {})) 
+
+    if isinstance(query_state, dict):
+        travellers = query_state.get("travellers", [])
+    else:
+        travellers = query_state.travellers
+    # print(f"Validating plan with travellers: {query_state} validate_plan_node at orchestrator.py")
+
     is_valid, error_msg = validate_plan(
         plan_xml=plan_xml,
-        travellers=query_state.travellers,
+        travellers=travellers,
         candidates=state.get("candidate_destinations", []),
     )
- 
+
+    print(f"Plan validation result: is_valid={is_valid}, error_msg='{error_msg}'")  # Debug print
+
     return {
         **state,
         "rewoo_plan_valid": is_valid,
@@ -196,7 +213,7 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
  
     if replan_count >= 2:
         # Build fallback plan directly
-        query_state = state.get("query_state", QueryState())
+        query_state = query_state_from_dict(state.get("query_state", {}))
         candidates = state.get("candidate_destinations", ["IST", "LIS", "AMS"])
         dest_str = ",".join(candidates)
  
@@ -239,8 +256,9 @@ def execute_node(state: OrchestratorState) -> OrchestratorState:
     Runs traveller agents, accommodation agent, currency agent.
     Traveller agents run sequentially here (parallel via Send() in graph.py Step 14).
     """
-    query_state = state.get("query_state", QueryState())
+    query_state = query_state_from_dict(state.get("query_state", {}))
     candidates = state.get("candidate_destinations", [])
+    print(f"candidates {candidates}")
     errors = list(state.get("errors", []))
  
     # Build working state for sub-agents
@@ -258,33 +276,32 @@ def execute_node(state: OrchestratorState) -> OrchestratorState:
         all_flight_results.extend(result.get("flight_results", []))
         errors.extend(result.get("errors", []))
  
-    # Build DestinationResult shells for each candidate
-    destination_results = [
-        DestinationResult(city=iata, iata=iata)
-        for iata in candidates
-    ]
- 
-    # Attach flights to each destination
-    for dest in destination_results:
-        dest_flights = [
-            f for f in all_flight_results
-            if f.destination_iata == dest.iata
-        ]
-    
-        # Check every traveller has a flight to this destination
-        covered_origins = {f.origin_iata for f in dest_flights}
-        required_origins = {t.origin_iata for t in query_state.travellers}
-    
-        if not required_origins.issubset(covered_origins):
-            # Not all travellers can reach this destination
-            missing = required_origins - covered_origins
-            errors.append(f"{dest.iata} dropped — no flights from: {missing}")
-            continue  # skip this destination
-    
+    # Group flights by destination — one DestinationResult per destination iata
+    flights_by_dest: dict[str, list] = {}
+    for f in all_flight_results:
+        flights_by_dest.setdefault(f.destination_iata, []).append(f)
+
+    required_origins = {t.origin_iata for t in query_state.travellers}
+    destination_results = []
+
+    for iata, dest_flights in flights_by_dest.items():
+        # For region/anywhere mode, drop destinations not reachable by all travellers.
+        # For specific mode, keep them — the user asked for these explicitly.
+        if query_state.search_mode != "specific":
+            covered_origins = {f.origin_iata for f in dest_flights}
+            if not required_origins.issubset(covered_origins):
+                missing = required_origins - covered_origins
+                errors.append(f"{iata} dropped — no flights from: {missing}")
+                continue
+
+        dest = DestinationResult(city=iata, iata=iata)
         dest.flights = dest_flights
         dest.total_flight_cost_usd = sum(
             f.price_usd or f.price_local for f in dest_flights
         )
+        destination_results.append(dest)
+
+    print(f"destination_results built from traveller output: {destination_results}")
  
     # Run accommodation agent
     accom_state = {**sub_state, "destination_results": destination_results}
@@ -399,8 +416,9 @@ def run_orchestrator(state: dict) -> dict:
     Entry point for the main travel agent graph.
     Runs full ReWOO plan → execute → solve cycle.
     """
+    print(f"Running orchestrator with initial state: {state}")  # Debug print
     result = orchestrator_agent.invoke({
-        "query_state":               state.get("query_state", QueryState()),
+        "query_state":               state.get("query_state", {}),
         "semantic_memory":           state.get("semantic_memory"),
         "episodic_memory":           state.get("episodic_memory"),
         "prioritised_destinations":  state.get("prioritised_destinations", []),

@@ -27,7 +27,7 @@ from src.memory.db import get_db_connection, initialize_db
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
-from src.state import QueryState, MemoryReadState, MemoryWriteState
+from src.state import QueryState, MemoryReadState, MemoryWriteState, query_state_from_dict, query_state_to_dict
 
 # ── Singletons ────────────────────────────────────────────────
 initialize_db()
@@ -84,7 +84,7 @@ def check_procedural_node(state: MemoryReadState) -> MemoryReadState:
     if not origins:
         return {**state, "prioritised_destinations": []}
  
-    top = procedural.get_top_destinations(origins, limit=5)
+    top = procedural.get_top_destinations_for_origin_pattern(origins, top_n=5)
     prioritised = [d.get("destination", d.get("iata", "")) for d in top]
  
     return {**state, "prioritised_destinations": prioritised}
@@ -287,8 +287,9 @@ def run_memory_read(state: dict) -> dict:
     Pre-search: check caches, prioritise destinations, surface past searches.
     Also injects memory instances into state for downstream agents.
     """
+    # print(f"\n Running memory read with initial state: {state}")
     result = memory_read_agent.invoke({
-        "query_state":              state.get("query_state", QueryState()),
+        "query_state":              query_state_from_dict(state.get("query_state", {})),
         "session_id":               state.get("session_id", ""),
         "cache_hit":                False,
         "cached_result":            None,
@@ -303,16 +304,15 @@ def run_memory_read(state: dict) -> dict:
         "prioritised_destinations":   result.get("prioritised_destinations", []),
         "past_searches_summary":      result.get("past_searches_summary"),
         # Inject memory instances for traveller, accommodation, activities agents
-        "episodic_memory":            episodic,
-        "semantic_memory":            semantic,
         "errors":                     result.get("errors", []),
+        "query_state":                 query_state_to_dict(result.get("query_state", QueryState())),
     }
  
  
 def run_memory_write(state: dict) -> dict:
     """Post-search: persist results, record winner, log HITL checkpoints."""
     result = memory_write_agent.invoke({
-        "query_state":           state.get("query_state", QueryState()),
+        "query_state":           query_state_from_dict(state.get("query_state", {})),
         "session_id":            state.get("session_id", ""),
         "ranked_destinations":   state.get("ranked_destinations", []),
         "flight_results":        state.get("flight_results", []),

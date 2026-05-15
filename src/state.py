@@ -37,7 +37,15 @@ class Traveller:
     name: str
     origin_city: str
     origin_iata: str
+    currency: str | None = None
     preferences: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class Outbound_flights:
+    city: str
+    country: str
+    code: str
+
 
 @dataclass
 class FlightResult:
@@ -46,9 +54,12 @@ class FlightResult:
     destination_iata: str
     price_local: float
     currency: str
+    avg_cost_per_night: float
+    outbound_flights: dict[str, Any] = field(default_factory=dict)
     price_usd: float | None = None
     fetched_at: str | None = None
     from_cache: bool = False
+
 
 @dataclass
 class AccommodationResult:
@@ -56,6 +67,7 @@ class AccommodationResult:
     destination_city: str
     destination_iata: str
     price_per_night_local: float
+    price_per_night_usd: float
     currency: str
     nights: int
     total_usd: float | None = None
@@ -110,14 +122,19 @@ class QueryState:
     candidate_destinations: list[DestinationResult] = field(default_factory=list)
     duration_nights: int | None = None
     region_preferences: str | None = None # Europe, Anywhere, etc.
-    candidate_destinations: list[DestinationResult] = field(default_factory=list)
+    destination_locations: list[str] = field(default_factory=list)
+    search_mode: str | None = None  # "specific" | "region" | "anywhere"
+    # in state.py
+    search_mode: str | None = None  # "specific" | "region" | "anywhere"
+
 
     def is_ready_for_search(self) -> bool:
         """Determines if we have enough information to run a search."""
         return (
             len(self.travellers) > 0 and
-            self.travel_month is not None and
-            self.duration_nights is not None
+            (self.travel_month is not None or self.outbound_date is not None) and
+            self.duration_nights is not None and
+            self.search_mode is not null
         )
     
     def missing_info(self) -> list[str]:
@@ -282,7 +299,7 @@ class TravellerCost:
     """Cost breakdown for one traveller at one destination."""
     traveller_name: str
     origin_iata: str
-    currency: str
+    currency: str 
     flight_usd: float
     accommodation_share_usd: float
     total_usd: float
@@ -348,4 +365,110 @@ class OrchestratorState(dict):
     exchange_rates: dict
     ranked_destinations: list
     errors: list[str]
+
+# ── Internal state for this agent's graph ────────────────────
+class CurrencyState(dict):
+    travellers: list[Traveller]
+    destination_results: list           # list of DestinationResult
+    flight_results: list                # list of FlightResult
+    accommodation_results: list         # list of AccommodationResult
+    exchange_rates: dict[str, float]    # currency → rate from USD
+    updated_destination_results: list
+    errors: list[str]
+ 
+ 
+class IntakeState(dict):
+    user_message: str
+    query_state: QueryState
+    conversation_history: list[dict]
+    turn_count: int
+
+    # classifier
+    raw_classify_output: str | None
+    classification: dict | None
+    classify_retry_count: int
+    classify_error: str | None
+    intent_status: IntentStatus | None
+    out_of_scope_reason: str | None
+    agent_response: str | None
+
+    # elicitation
+    raw_elicit_output: str | None
+    parsed_elicit_output: dict | None
+    elicit_retry_count: int
+    elicit_error: str | None
+    elicitation_question: str | None
+    elicitation_complete: bool
+    corrections: list
+    turn_limit_reached: bool
+
+
+# ─────────────────────────────────────────
+# QueryState ↔ dict helpers
+# (keeps QueryState as plain dict in graph state for MemorySaver compatibility)
+# ─────────────────────────────────────────
+ 
+def query_state_to_dict(qs: QueryState) -> dict:
+    """Converts a QueryState dataclass to a plain serialisable dict."""
+    return {
+        "travellers": [
+            {
+                "name": t.name,
+                "origin_city": t.origin_city,
+                "origin_iata": t.origin_iata,
+                "currency": getattr(t, "currency", ""),
+                "preferences": getattr(t, "preferences", {}),
+            }
+            for t in qs.travellers
+        ],
+        "travel_month":     qs.travel_month,
+        "outbound_date":    qs.outbound_date,
+        "return_date":      qs.return_date,
+        "duration_nights":  qs.duration_nights,
+        "region_preferences": qs.region_preferences,
+        "destination_locations": qs.destination_locations,
+        "search_mode": qs.search_mode,
+        "candidate_destinations": [],  # DestinationResult not serialised here
+    }
+ 
+ 
+def _make_traveller(t: dict) -> "Traveller":
+    """Creates a Traveller from dict, handling optional currency field."""
+    kwargs = {
+        "name": t.get("name", ""),
+        "origin_city": t.get("origin_city", ""),
+        "origin_iata": t.get("origin_iata", ""),
+    }
+    # currency is optional — only pass if Traveller accepts it
+    import inspect
+    sig = inspect.signature(Traveller.__init__)
+    if "currency" in sig.parameters:
+        kwargs["currency"] = t.get("currency", "")
+    if "preferences" in sig.parameters:
+        kwargs["preferences"] = t.get("preferences", {})
+    return Traveller(**kwargs)
+ 
+ 
+def query_state_from_dict(d: dict) -> QueryState:
+    """Converts a plain dict back to a QueryState dataclass."""
+    if isinstance(d, QueryState):
+        return d  # already a QueryState — no-op
+    if not isinstance(d, dict):
+        return QueryState()
+ 
+    travellers = [
+        _make_traveller(t)
+        for t in d.get("travellers", [])
+    ]
+ 
+    qs = QueryState()
+    qs.travellers          = travellers
+    qs.travel_month        = d.get("travel_month")
+    qs.outbound_date       = d.get("outbound_date")
+    qs.return_date         = d.get("return_date")
+    qs.duration_nights     = d.get("duration_nights")
+    qs.region_preferences  = d.get("region_preferences")
+    qs.destination_locations = d.get("destination_locations") or []
+    qs.search_mode         = d.get("search_mode")
+    return qs
  

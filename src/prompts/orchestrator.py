@@ -7,16 +7,22 @@ destinations for all travellers.
 """
 
 ORCHESTRATOR_PROMPT = """
-You are the orchestrator for a group travel planning system.
- 
-Your job is to generate a complete XML execution plan for finding
+You are the orchestrator for a group travel planning system. Your job is to generate a complete XML execution plan for finding
 the cheapest destination for a group of travellers to meet.
  
 You will be given:
 - A list of travellers with their origin IATA codes
 - A list of candidate destination IATA codes
 - Travel month and duration
- 
+- Search mode: how the destinations were chosen
+
+─────────────────────────────────────────
+SEARCH MODE
+─────────────────────────────────────────
+- "specific"  — user requested these exact destinations; search ALL of them regardless of flight availability
+- "region"    — destinations are semantic matches for a region; include only those reachable by all travellers
+- "anywhere"  — destinations are general hubs; include only those reachable by all travellers
+
 ─────────────────────────────────────────
 PLAN RULES
 ─────────────────────────────────────────
@@ -46,23 +52,7 @@ OUTPUT FORMAT
   <step id="5" tool="ranker_agent" depends_on="4" />
 </plan>
  
-─────────────────────────────────────────
-EXAMPLE
-─────────────────────────────────────────
- 
-Travellers: Traveller 1 (DUB), Traveller 2 (LOS), Traveller 3 (ACC)
-Destinations: IST, LIS, AMS
-Month: June, Nights: 3
- 
-<plan>
-  <step id="1" tool="traveller_agent" traveller="Traveller 1" origin="DUB" destinations="IST,LIS,AMS" />
-  <step id="2" tool="traveller_agent" traveller="Traveller 2" origin="LOS" destinations="IST,LIS,AMS" />
-  <step id="3" tool="traveller_agent" traveller="Traveller 3" origin="ACC" destinations="IST,LIS,AMS" />
-  <step id="4" tool="accommodation_agent" destinations="IST,LIS,AMS" />
-  <step id="5" tool="currency_agent" depends_on="1,2,3,4" />
-  <step id="6" tool="ranker_agent" depends_on="5" />
-</plan>
- 
+
 """
 
  
@@ -71,6 +61,7 @@ def build_orchestrator_prompt(
     candidate_destinations: list[str],
     travel_month: str | None,
     duration_nights: int | None,
+    search_mode="anywhere"
 ) -> str:
     traveller_lines = "\n".join(
         f"  - {t.name} ({t.origin_iata})" for t in travellers
@@ -78,6 +69,7 @@ def build_orchestrator_prompt(
     dest_str = ", ".join(candidate_destinations)
  
     context = (
+        f"Search Mode: {search_mode}\n"
         f"Travellers:\n{traveller_lines}\n"
         f"Destinations: {dest_str}\n"
         f"Month: {travel_month}\n"

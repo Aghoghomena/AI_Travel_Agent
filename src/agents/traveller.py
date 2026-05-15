@@ -13,10 +13,11 @@ from typing import Literal
 from datetime import datetime
 from langgraph.graph import StateGraph, START, END
 from src.prompts.traveller import build_iata_resolution_prompt
-from src.tools.amadeus import search_flights, resolve_iata
+from src.tools.flight import search_flights
 from src.state import FlightResult, QueryState, Traveller
 from src.utils.config import llm
 from src.state import TravellerState
+from data.iata import resolve_iata
 
 # ── Tools ─────────────────────────────────────────────────────
  
@@ -124,24 +125,28 @@ def search_flights_node(state: TravellerState) -> TravellerState:
     """
     if state.get("iata_resolution_error"):
         return state
+    # print (f"state at search_flights_node on traveller.py {state}")
  
     traveller = state["traveller"]
     origin_iata = traveller.origin_iata
     destinations = state.get("candidate_destinations", [])
-    outbound_date = state.get("outbound_date", "")
     episodic_memory = state.get("episodic_memory")
- 
+    query_state = state.get("query_state", QueryState())
+    outbound_date = query_state.outbound_date or state.get("outbound_date", "")
+
     flight_results = list(state.get("flight_results", []))
     search_errors = list(state.get("search_errors", []))
- 
+
+    destination_locations = query_state.destination_locations
+
+    # Check cache for each candidate destination
+    cache_miss = False
     for dest_iata in destinations:
         if dest_iata == origin_iata:
             continue
- 
-        # Check cache first
         cached = check_episodic_cache(episodic_memory, origin_iata, dest_iata, outbound_date)
         if cached:
-            cached_result = FlightResult(
+            flight_results.append(FlightResult(
                 origin_iata=cached.origin_iata,
                 destination_iata=cached.destination_iata,
                 price_local=cached.price_local,
@@ -149,26 +154,37 @@ def search_flights_node(state: TravellerState) -> TravellerState:
                 price_usd=cached.price_usd,
                 fetched_at=cached.fetched_at,
                 from_cache=True,
-            )
-            flight_results.append(cached_result)
-            continue
- 
-        # Cache miss — call Amadeus
+            ))
+        else:
+            cache_miss = True
+
+    if cache_miss:
         results = search_flights(
             origin_iata=origin_iata,
-            destination_iata=dest_iata,
-            travel_month=state.get("travel_month"),
+            travel_month=state["travel_month"],
             outbound_date=outbound_date if outbound_date else None,
+            duration_nights=query_state.duration_nights,
+            travel_region=query_state.region_preferences,
+            destination_country=destination_locations if destination_locations else destinations,
         )
- 
+
         if results:
             for r in results:
-                write_episodic_cache(episodic_memory, r)
-            flight_results.extend(results)
+                # print(f"output of api_call {r}")
+                flight_result = FlightResult(
+                    origin_iata=r["origin_iata"],
+                    destination_iata=r["destination_iata"],
+                    price_local=r["price_usd"],
+                    currency="USD",
+                    avg_cost_per_night=r.get("avg_cost_per_night", 0),
+                    outbound_flights=r.get("Outbound_flights", []),
+                    price_usd=r["price_usd"],
+                    fetched_at=str(r.get("fetched_at", "")),
+                )
+                write_episodic_cache(episodic_memory, flight_result)
+                flight_results.append(flight_result)
         else:
-            search_errors.append(
-                f"No flights found: {origin_iata} → {dest_iata}"
-            )
+            search_errors.append(f"No flights found from {origin_iata}")
  
     return {
         **state,

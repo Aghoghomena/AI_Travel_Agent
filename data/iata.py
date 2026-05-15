@@ -19,6 +19,11 @@ IATA_MAP = {
     "berlin": "BER",
     "montreal": "YUL",
     "vancouver": "YVR",
+    "new york city": "JFK",
+    "nyc": "JFK",
+    "lon": "LHR",
+    "dub": "DUB",
+    "lagos nigeria": "LOS",
 }
 
 # Month name → number
@@ -30,6 +35,7 @@ MONTH_MAP = {
 
 def resolve_iata(city_name: str) -> str | None:
     """Resolves a city name to IATA code. Returns None if unknown."""
+    print(f"Resolving IATA for city: '{city_name}'")  # Debug print
     return IATA_MAP.get(city_name.lower().strip())
 
 REGION_AIRPORTS = {
@@ -253,3 +259,109 @@ INCLUDED_TYPES = [
     "historical_landmark",
 ]
  
+# Region kgmids for arrival_area_id
+REGIONS = {
+    "europe": "/m/02j9z",
+    "asia": "/m/0j0k",
+    "north america": "/m/05rgl",
+    "africa": "/m/0dg3n1",
+    "caribbean": "/m/01p6xx",
+    "middle east": "/m/03838",
+    "south america": "/m/05r7t",
+    "oceania": "/m/057ln",
+}
+
+COUNTRY_TO_CONTINENT = {
+    # =========================
+    # Africa
+    # =========================
+    "South Africa": "Africa",
+    "Nigeria": "Africa",
+    "Kenya": "Africa",
+    "Egypt": "Africa",
+    "Morocco": "Africa",
+    "Ghana": "Africa",
+    "Tanzania": "Africa",
+    "Ethiopia": "Africa",
+    "Tunisia": "Africa",
+    "Algeria": "Africa",
+    "Uganda": "Africa",
+    "Rwanda": "Africa",
+
+    # =========================
+    # Europe
+    # =========================
+    "United Kingdom": "Europe",
+    "Ireland": "Europe",
+    "France": "Europe",
+    "Germany": "Europe",
+    "Spain": "Europe",
+    "Portugal": "Europe",
+    "Italy": "Europe",
+    "Netherlands": "Europe",
+    "Belgium": "Europe",
+    "Switzerland": "Europe",
+    "Austria": "Europe",
+    "Sweden": "Europe",
+    "Norway": "Europe",
+    "Denmark": "Europe",
+    "Finland": "Europe",
+    "Poland": "Europe",
+    "Greece": "Europe",
+    "Czech Republic": "Europe",
+    "Hungary": "Europe",
+
+    # =========================
+    # Asia
+    # =========================
+    "China": "Asia",
+    "Japan": "Asia",
+    "South Korea": "Asia",
+    "India": "Asia",
+    "Thailand": "Asia",
+    "Vietnam": "Asia",
+    "Singapore": "Asia",
+    "Malaysia": "Asia",
+    "Indonesia": "Asia",
+    "Philippines": "Asia",
+    "United Arab Emirates": "Asia",
+    "Saudi Arabia": "Asia",
+    "Qatar": "Asia",
+    "Turkey": "Asia",  # sometimes classified as Europe too depending on system
+
+    # =========================
+    # North America
+    # =========================
+    "United States": "North America",
+    "Canada": "North America",
+    "Mexico": "North America",
+    "Costa Rica": "North America",
+    "Cuba": "North America",
+    "Jamaica": "North America",
+    "Dominican Republic": "North America",
+
+    # =========================
+    # South America
+    # =========================
+    "Brazil": "South America",
+    "Argentina": "South America",
+    "Chile": "South America",
+    "Peru": "South America",
+    "Colombia": "South America",
+    "Ecuador": "South America",
+    "Bolivia": "South America",
+    "Uruguay": "South America",
+
+    # =========================
+    # Oceania
+    # =========================
+    "Australia": "Oceania",
+    "New Zealand": "Oceania",
+    "Fiji": "Oceania",
+    "Papua New Guinea": "Oceania",
+
+    # =========================
+    # Antarctica
+    # =========================
+    "Antarctica": "Antarctica"
+}

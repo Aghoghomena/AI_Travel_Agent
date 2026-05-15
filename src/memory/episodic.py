@@ -86,7 +86,7 @@ class EpisodicMemory:
         if row:
             return {
                 "origins": row["origins_key"],
-                "destination": row["destination"],
+                "destinations": json.loads(row["destinations"]),
                 "outbound_date": row["outbound_date"],
                 "duration_nights": row["duration_nights"],
                 "flights": json.loads(row["flights_json"]),
@@ -128,13 +128,13 @@ class EpisodicMemory:
         conn = get_db_connection()
         conn.execute("""
             INSERT INTO episodic_searches
-                (origins_key, destination, outbound_date,
+                (origins_key, destinations, outbound_date,
                  duration_nights, flights_json, accommodation_json,
                  total_usd, exchange_rates_json,
                  fetched_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            key, destination.lower(), outbound_date,
+            key, json.dumps([destination.lower()]), outbound_date,
             duration_nights, flights_json, acc_json,
             total_usd, json.dumps(exchange_rates),
             now.isoformat(), expires
@@ -147,7 +147,7 @@ class EpisodicMemory:
         """Returns the 5 most recent past searches for an origin combination."""
         key = sort_origins_key(origins)
         conn = get_db_connection()
-        rows = conn.execute(""" SELECT destination, outbound_date, total_usd, fetched_at
+        rows = conn.execute(""" SELECT destinations, outbound_date, total_usd, fetched_at
             FROM episodic_searches WHERE origins_key = ? ORDER BY fetched_at DESC LIMIT 5
         """, (key,)).fetchall()
         conn.close()

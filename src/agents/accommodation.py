@@ -54,6 +54,7 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
     Node 1: Returns mocked accommodation costs for each candidate
     destination. Checks episodic cache first. if new write the results into episodic memory
     """
+    print(f"the state at fetch accomodation {state}")
     destinations = state.get("candidate_destinations", [])
     nights = state.get("duration_nights", 1)
     episodic_memory = state.get("episodic_memory")
@@ -67,7 +68,7 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
             results.append(AccommodationResult(
                 destination_city=cached.destination_city,
                 destination_iata=cached.destination_iata,
-                price_per_night_local=cached.price_per_night_local,
+                price_per_night_usd=cached.price_per_night_usd,
                 currency=cached.currency,
                 nights=cached.nights,
                 total_usd=cached.total_usd,
@@ -82,7 +83,7 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
         result = AccommodationResult(
             destination_city=dest_iata,    # city name resolved at display time
             destination_iata=dest_iata,
-            price_per_night_local=price_per_night,
+            price_per_night_usd=price_per_night,
             currency="USD",
             nights=nights,
             total_usd=total_usd,
@@ -122,12 +123,22 @@ def run_accommodation_agent(state: dict) -> dict:
     Runs accommodation lookup for all candidate destinations.
     """
     query_state = state.get("query_state", QueryState())
+    print (f"the query state {query_state}")
  
+    # Derive destinations from DestinationResult objects if available,
+    # so accommodation only runs for destinations that have actual flights.
+    destination_results = state.get("destination_results", [])
+    if destination_results:
+        candidate_iatas = [d.iata for d in destination_results]
+    else:
+        candidate_iatas = state.get("candidate_destinations", [])
+
     result = accommodation_agent.invoke({
-        "candidate_destinations": state.get("candidate_destinations", []),
+        "candidate_destinations": candidate_iatas,
         "duration_nights": query_state.duration_nights or 1,
         "accommodation_results": [],
         "episodic_memory": state.get("episodic_memory"),
+        "destination_results": destination_results,
     })
  
     return {

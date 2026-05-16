@@ -11,6 +11,7 @@ LangGraph node: run_activities_agent(state) -> dict
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
 from src.tools.google_places import get_activities
+from src.memory.semantic import SemanticMemory
 from src.state import Activity, ActivitiesState
 
  
@@ -45,7 +46,7 @@ def fetch_activities_node(state: ActivitiesState) -> ActivitiesState:
     Writes results to cache.
     """
     destination_iatas = state.get("destination_iatas", [])
-    semantic_memory = state.get("semantic_memory")
+    semantic_memory = SemanticMemory()
     activities = dict(state.get("activities", {}))
     errors = list(state.get("errors", []))
  
@@ -112,8 +113,10 @@ def run_activities_agent(state: dict) -> dict:
     })
  
     return {
+        **state,
         "activities": result.get("activities", {}),
         "errors": result.get("errors", []),
+        "activities_fetched": True,
     }
  
  

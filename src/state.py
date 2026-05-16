@@ -97,6 +97,7 @@ class DestinationResult:
     total_accommodation_usd: float | None = None
     grand_total_usd: float | None = None
     rank: int | None = None
+    per_traveller_breakdown: list | None = None
 
 
 @dataclass
@@ -134,7 +135,7 @@ class QueryState:
             len(self.travellers) > 0 and
             (self.travel_month is not None or self.outbound_date is not None) and
             self.duration_nights is not None and
-            self.search_mode is not null
+            self.search_mode is not None
         )
     
     def missing_info(self) -> list[str]:

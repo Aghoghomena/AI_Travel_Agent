@@ -48,6 +48,7 @@ class EpisodicMemory:
         conn = get_db_connection()
         cursor = conn.cursor()
         expires_at = datetime.utcnow() + timedelta(hours=ttl_hours([result.currency]))
+        outbound_date = result.outbound_flights[0] if isinstance(result.outbound_flights, list) and result.outbound_flights else ""
         cursor.execute("""
             INSERT INTO flights (origin_iata, destination_iata, outbound_date, price_local, currency, price_usd, fetched_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -60,7 +61,7 @@ class EpisodicMemory:
         """, (
             result.origin_iata,
             result.destination_iata,
-            result.outbound_date,
+            outbound_date,
             result.price_local,
             result.currency,
             result.price_usd,
@@ -78,11 +79,18 @@ class EpisodicMemory:
         conn = get_db_connection()
         cursor = conn.cursor()
         origins_key = sort_origins_key(origins)
-        row = cursor.execute("""
-            SELECT * FROM episodic_searches
-            WHERE origins_key = ? AND destinations = ? AND outbound_date = ? AND duration_nights = ? AND expires_at > ?
-        """, (origins_key, json.dumps(destinations), outbound_date, duration_nights, datetime.utcnow())).fetchone()
-        conn.close()
+        query = "SELECT * FROM episodic_searches WHERE origins_key = ? AND duration_nights = ? AND expires_at > ?"
+        params: list = [origins_key, duration_nights, datetime.utcnow()]
+
+        if destinations:
+            query += " AND destinations = ?"
+            params.append(json.dumps(destinations))
+        if outbound_date:
+            query += " AND outbound_date = ?"
+            params.append(outbound_date)
+        
+        print(f"\n[episodic] SQL: {query} | params: {params} \n")
+        row = cursor.execute(query, params).fetchone()
         if row:
             return {
                 "origins": row["origins_key"],
@@ -98,7 +106,7 @@ class EpisodicMemory:
             }
         return None
 
-    def set_group_search(self,origins: list[str],destination: str,outbound_date: str,duration_nights: int,flights: list[FlightResult],accommodation: AccommodationResult,total_usd: float,exchange_rates: dict) -> None:
+    def set_group_search(self,origins: list[str],destination: str,outbound_date: str,return_date: str,duration_nights: int,flights: list[FlightResult],accommodation: AccommodationResult,total_usd: float,exchange_rates: dict,activities: list | None = None) -> None:
         """Stores a complete group search result in memory."""
         key = sort_origins_key(origins)
         now = datetime.utcnow()
@@ -125,22 +133,27 @@ class EpisodicMemory:
             "total_usd": accommodation.total_usd,
         })
 
+        activities_json = json.dumps(activities or [])
         conn = get_db_connection()
-        conn.execute("""
-            INSERT INTO episodic_searches
-                (origins_key, destinations, outbound_date,
-                 duration_nights, flights_json, accommodation_json,
-                 total_usd, exchange_rates_json,
-                 fetched_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            key, json.dumps([destination.lower()]), outbound_date,
-            duration_nights, flights_json, acc_json,
-            total_usd, json.dumps(exchange_rates),
-            now.isoformat(), expires
-        ))
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute("""
+                INSERT INTO episodic_searches
+                    (origins_key, destinations, outbound_date, return_date,
+                     region_preferences, duration_nights,
+                     flights_json, accommodation_json,
+                     total_usd, exchange_rates_json, exchange_rate, activities_json,
+                     fetched_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                key, json.dumps([destination.lower()]), outbound_date, return_date,
+                "", duration_nights, flights_json, acc_json,
+                total_usd, json.dumps(exchange_rates),
+                next((v for v in exchange_rates.values() if v is not None), 1.0),
+                activities_json, now.isoformat(), expires
+            ))
+            conn.commit()
+        finally:
+            conn.close()
     
 
     def get_past_searches(self, origins: list[str]) -> list[dict]:

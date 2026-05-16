@@ -14,6 +14,7 @@ LangGraph node: run_accommodation_agent(state) -> dict
 from datetime import datetime
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
+from src.memory.episodic import EpisodicMemory
 from src.state import AccommodationResult, AccommodationState, QueryState
 from data.iata import MOCK_HOTEL_PRICES
 
@@ -55,11 +56,11 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
     destination. Checks episodic cache first. if new write the results into episodic memory
     """
     print(f"the state at fetch accomodation {state}")
-    destinations = state.get("candidate_destinations", [])
-    nights = state.get("duration_nights", 1)
-    episodic_memory = state.get("episodic_memory")
- 
-    results = list(state.get("accommodation_results", []))
+    destinations = state.get("candidate_destinations") or []
+    nights = state.get("duration_nights") or 1
+    episodic_memory = EpisodicMemory()
+
+    results = list(state.get("accommodation_results") or [])
  
     for dest_iata in destinations:
         # Check cache first
@@ -68,6 +69,7 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
             results.append(AccommodationResult(
                 destination_city=cached.destination_city,
                 destination_iata=cached.destination_iata,
+                price_per_night_local=cached.price_per_night_local,
                 price_per_night_usd=cached.price_per_night_usd,
                 currency=cached.currency,
                 nights=cached.nights,
@@ -81,8 +83,9 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
         total_usd = round(price_per_night * nights, 2)
  
         result = AccommodationResult(
-            destination_city=dest_iata,    # city name resolved at display time
+            destination_city=dest_iata,
             destination_iata=dest_iata,
+            price_per_night_local=price_per_night,
             price_per_night_usd=price_per_night,
             currency="USD",
             nights=nights,
@@ -127,11 +130,11 @@ def run_accommodation_agent(state: dict) -> dict:
  
     # Derive destinations from DestinationResult objects if available,
     # so accommodation only runs for destinations that have actual flights.
-    destination_results = state.get("destination_results", [])
+    destination_results = state.get("destination_results") or []
     if destination_results:
         candidate_iatas = [d.iata for d in destination_results]
     else:
-        candidate_iatas = state.get("candidate_destinations", [])
+        candidate_iatas = state.get("candidate_destinations") or []
 
     result = accommodation_agent.invoke({
         "candidate_destinations": candidate_iatas,

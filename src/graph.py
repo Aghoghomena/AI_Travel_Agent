@@ -120,6 +120,7 @@ def hitl_2_node(state: dict) -> dict:
     ones to fetch activities for.
     """
     ranked = state.get("ranked_destinations", [])
+    print(f"[hitl_2] ranked_destinations count: {len(ranked)}, first: {ranked[0] if ranked else 'EMPTY'}")  # ← here
  
     if not ranked:
         return {

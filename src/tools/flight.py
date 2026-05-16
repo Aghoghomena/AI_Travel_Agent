@@ -139,7 +139,7 @@ def search_everywhere_with_specific_date(origin_iata: str,outbound_date: str, du
         "engine": "google_travel_explore",
         "departure_id": origin_iata,
         "time_period": f"{start_date}..{end_date}",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     
     response = requests.get(BASE_URL, params=params)
@@ -163,7 +163,7 @@ def search_everywhere_by_month(origin_iata: str,travel_month: str, adults: int =
         "departure_id": origin_iata,
         "time_period": f"one_week_trip_in_{travel_month}",   
         "currency": "USD",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     response = requests.get(BASE_URL, params=params)
 
@@ -189,7 +189,7 @@ def search_region_by_month(origin_iata: str,travel_month: str, travel_region: st
         "arrival_id": region_kgmid,
         "time_period": f"one_week_trip_in_{travel_month}",   
         "currency": "USD",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     response = requests.get(BASE_URL, params=params)
 
@@ -217,7 +217,7 @@ def search_region_with_specific_date(origin_iata: str,outbound_date: str, durati
         "engine": "google_travel_explore",
         "departure_id": origin_iata,
         "time_period": f"{start_date}..{end_date}",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     
     response = requests.get(BASE_URL, params=params)
@@ -243,7 +243,7 @@ def search_location_by_month(origin_iata: str, travel_month: str, destination_co
         "departure_id": origin_iata,
         "time_period": f"one_week_trip_in_{travel_month}",   
         "currency": "USD",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     response = requests.get(BASE_URL, params=params)
 
@@ -271,7 +271,7 @@ def search_location_specific_date(origin_iata: str, outbound_date: str, duration
         "engine": "google_travel_explore",
         "departure_id": origin_iata,
         "time_period": f"{start_date}..{end_date}",
-        "api_key": "YHoiJ35tNnsF65MxnaXqtwcs"
+        "api_key": API_KEY
     }
     
     response = requests.get(BASE_URL, params=params)

@@ -20,6 +20,7 @@ from src.agents.accommodation import run_accommodation_agent
 from src.agents.currency import run_currency_agent
 from src.agents.ranker import run_ranker_agent
 from src.memory.semantic import SemanticMemory
+from src.memory.episodic import EpisodicMemory
 from src.state import QueryState, DestinationResult, Traveller
 from src.utils.config import llm
 from src.state import OrchestratorState, query_state_from_dict, query_state_to_dict
@@ -135,7 +136,7 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
     """
     query_state = query_state_from_dict(state.get("query_state", {}))
     print(f"Planning Node with query_state: {query_state} in plan_node at orchestrator.py")  # Debug print
-    semantic_memory = state.get("semantic_memory")
+    semantic_memory = SemanticMemory()
     prioritised = state.get("prioritised_destinations", [])
     errors = list(state.get("errors", []))
  

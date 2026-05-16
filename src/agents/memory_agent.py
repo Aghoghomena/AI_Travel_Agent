@@ -27,7 +27,7 @@ from src.memory.db import get_db_connection, initialize_db
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
-from src.state import QueryState, MemoryReadState, MemoryWriteState, query_state_from_dict, query_state_to_dict
+from src.state import QueryState, MemoryReadState, MemoryWriteState, query_state_from_dict, query_state_to_dict, DestinationResult
 
 # ── Singletons ────────────────────────────────────────────────
 initialize_db()
@@ -53,13 +53,15 @@ def check_episodic_node(state: MemoryReadState) -> MemoryReadState:
     Node 1 (READ): Checks episodic cache for a prior full group search
     matching same origins + destinations + date + nights.
     """
+
+    print (f"state at check_episodic_node {state}")
     query_state = state.get("query_state", QueryState())
     origins = _origins(query_state)
     outbound_date = _outbound_date(query_state)
-    nights = query_state.duration_nights or 0
+    nights = query_state.duration_nights or 1
     candidates = query_state.candidate_destinations
  
-    if not origins or not outbound_date or not candidates:
+    if not origins or not outbound_date:
         return {**state, "cache_hit": False, "cached_result": None}
  
     dest_iatas = [
@@ -68,6 +70,7 @@ def check_episodic_node(state: MemoryReadState) -> MemoryReadState:
     ]
  
     cached = episodic.get_full_group_search(origins, dest_iatas, outbound_date, nights)
+    print(f"output of search episodic memory {cached}")
     if cached:
         return {**state, "cache_hit": True, "cached_result": cached}
  
@@ -108,7 +111,7 @@ def surface_past_searches_node(state: MemoryReadState) -> MemoryReadState:
         return {**state, "past_searches_summary": None}
  
     lines = [
-        f"  {p['destination'].upper()} on {p['outbound_date']} — ${p['total_usd']:.0f} total"
+        f"  {p['destinations'].upper()} on {p['outbound_date']} — ${p['total_usd']:.0f} total"
         for p in past
     ]
     summary = f"Found {len(past)} past search(es) for this group:\n" + "\n".join(lines)
@@ -122,15 +125,23 @@ def write_episodic_node(state: MemoryWriteState) -> MemoryWriteState:
     Node 1 (WRITE): Stores individual flight legs and the full group
     search result to episodic memory.
     """
+    
+    print(f" \nthe query state at write episodic {QueryState} \n")
+    print(f"\n the state at write episodic {state}\n")
     query_state  = state.get("query_state", QueryState())
-    origins      = _origins(query_state)
-    outbound_date = _outbound_date(query_state)
-    nights       = query_state.duration_nights or 0
     flight_results       = state.get("flight_results", [])
+   # origins      = _origins(query_state)
+    origins = list({f.origin_iata.lower() for f in flight_results if f.origin_iata})
+    outbound_date = _outbound_date(query_state)
     accommodation_results = state.get("accommodation_results", [])
+    nights = accommodation_results[0].nights if accommodation_results else (query_state.duration_nights or 0)
     exchange_rates = state.get("exchange_rates", {})
     ranked       = state.get("ranked_destinations", [])
+    activities_by_dest = state.get("activities", {})
     errors       = list(state.get("errors", []))
+
+    print (f"the origins {origins} at write_episodic_node \n")
+
  
     # Cache individual flight legs
     for f in flight_results:
@@ -152,11 +163,13 @@ def write_episodic_node(state: MemoryWriteState) -> MemoryWriteState:
                 origins=origins,
                 destination=dest.iata,
                 outbound_date=outbound_date,
+                return_date=query_state.return_date or "",
                 duration_nights=nights,
                 flights=dest_flights,
                 accommodation=accom,
                 total_usd=dest.grand_total_usd or 0.0,
                 exchange_rates=exchange_rates,
+                activities=activities_by_dest.get(dest.iata),
             )
         except Exception as e:
             errors.append(f"[memory] group search cache write failed for {dest.iata}: {e}")
@@ -296,16 +309,28 @@ def run_memory_read(state: dict) -> dict:
         "prioritised_destinations": [],
         "past_searches_summary":    None,
         "errors":                   [],
+        
+
     })
+
+    ranked_from_cache = []
+    if result.get("cache_hit"):
+        cached = result.get("cached_result", {})
+        for i, iata in enumerate(cached.get("destinations", [])):
+            ranked_from_cache.append(DestinationResult(
+                city=iata.upper(),
+                iata=iata.upper(),
+                grand_total_usd=cached.get("total_usd"),
+                rank=i + 1,
+            ))
  
     return {
         "episodic_cache_hit":         result["cache_hit"],
         "cached_result":              result.get("cached_result"),
         "prioritised_destinations":   result.get("prioritised_destinations", []),
         "past_searches_summary":      result.get("past_searches_summary"),
-        # Inject memory instances for traveller, accommodation, activities agents
         "errors":                     result.get("errors", []),
-        "query_state":                 query_state_to_dict(result.get("query_state", QueryState())),
+        "query_state":                query_state_to_dict(result.get("query_state", QueryState())),
     }
  
  
@@ -324,6 +349,7 @@ def run_memory_write(state: dict) -> dict:
     })
  
     return {
+        **state,
         "memory_write_complete": True,
         "errors":                result.get("errors", []),
     }

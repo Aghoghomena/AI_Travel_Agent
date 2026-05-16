@@ -84,16 +84,20 @@ def print_results(ranked_destinations: list, activities: dict):
             )
  
         # Activities
+        # Activities
         dest_activities = activities.get(dest.iata, [])
         if dest_activities:
-            console.print(f"     [dim]Things to do:[/dim]")
+            console.print(f"    [bold]🎯  Things to Do[/bold]")
+            by_category: dict[str, list] = {}
             for act in dest_activities:
-                cost = "Free" if act.is_free else f"${act.estimated_cost_usd:.0f}"
-                dist = f"{act.distance_km:.1f} km" if act.distance_km else ""
-                console.print(
-                    f"       [dim]·[/dim] [white]{act.name:<30}[/white]"
-                    f"  [green]{cost:<8}[/green]  [dim]{dist}[/dim]"
-                )
+                by_category.setdefault(act.category, []).append(act)
+            for category, acts in by_category.items():
+                console.print(f"       [cyan]{category}[/cyan]")
+                for act in acts:
+                    cost = "[green]Free[/green]" if act.is_free else f"[green]${act.estimated_cost_usd:.0f}[/green]"
+                    rating = f"  [yellow]★ {act.rating}[/yellow]" if act.rating else ""
+                    console.print(f"         · [white]{act.name}[/white]  {cost}{rating}")
+
  
         console.print()
  
@@ -206,6 +210,15 @@ def main():
             elif result.get("elicitation_question") and not result.get("elicitation_complete"):
                 print_agent(result["elicitation_question"])
  
+            elif result.get("activities_fetched"):
+                if result.get("past_searches_summary"):
+                    console.print(f"\n[dim]{result['past_searches_summary']}[/dim]")
+                print_results(
+                    result.get("ranked_destinations", []),
+                    result.get("activities", {}),
+                )
+                break
+
             elif result.get("ranked_destinations"):
                 if result.get("past_searches_summary"):
                     console.print(f"\n[dim]{result['past_searches_summary']}[/dim]")
@@ -213,6 +226,7 @@ def main():
                     result.get("ranked_destinations", []),
                     result.get("activities", {}),
                 )
+
  
             elif result.get("agent_response"):
                 print_agent(result["agent_response"])

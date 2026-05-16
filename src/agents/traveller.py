@@ -14,10 +14,11 @@ from datetime import datetime
 from langgraph.graph import StateGraph, START, END
 from src.prompts.traveller import build_iata_resolution_prompt
 from src.tools.flight import search_flights
+from src.memory.episodic import EpisodicMemory
 from src.state import FlightResult, QueryState, Traveller
 from src.utils.config import llm
 from src.state import TravellerState
-from data.iata import resolve_iata
+from data.iata import resolve_iata, IATA_TO_COUNTRY
 
 # ── Tools ─────────────────────────────────────────────────────
  
@@ -130,7 +131,7 @@ def search_flights_node(state: TravellerState) -> TravellerState:
     traveller = state["traveller"]
     origin_iata = traveller.origin_iata
     destinations = state.get("candidate_destinations", [])
-    episodic_memory = state.get("episodic_memory")
+    episodic_memory = EpisodicMemory()
     query_state = state.get("query_state", QueryState())
     outbound_date = query_state.outbound_date or state.get("outbound_date", "")
 
@@ -165,7 +166,9 @@ def search_flights_node(state: TravellerState) -> TravellerState:
             outbound_date=outbound_date if outbound_date else None,
             duration_nights=query_state.duration_nights,
             travel_region=query_state.region_preferences,
-            destination_country=destination_locations if destination_locations else destinations,
+            destination_country=destination_locations if destination_locations else [
+                    IATA_TO_COUNTRY[iata] for iata in destinations if iata in IATA_TO_COUNTRY
+                ] or None,
         )
 
         if results:

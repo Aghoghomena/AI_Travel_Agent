@@ -135,7 +135,7 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
     LLM to generate the XML execution plan.
     """
     query_state = query_state_from_dict(state.get("query_state", {}))
-    print(f"Planning Node with query_state: {query_state} in plan_node at orchestrator.py")  # Debug print
+    # print(f"Planning Node with query_state: {query_state} in plan_node at orchestrator.py")  # Debug print
     semantic_memory = SemanticMemory()
     prioritised = state.get("prioritised_destinations", [])
     errors = list(state.get("errors", []))
@@ -160,7 +160,7 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
  
     response = llm.invoke(prompt)
     raw = response.content.strip()
-    print(f"LLM raw response for plan_node at orchestrator.py:\n{raw}\n")  # Debug print
+    # print(f"LLM raw response for plan_node at orchestrator.py:\n{raw}\n")  # Debug print
 
     # Strip accidental markdown fences
     if raw.startswith("```"):
@@ -197,7 +197,7 @@ def validate_plan_node(state: OrchestratorState) -> OrchestratorState:
         candidates=state.get("candidate_destinations", []),
     )
 
-    print(f"Plan validation result: is_valid={is_valid}, error_msg='{error_msg}'")  # Debug print
+    # print(f"Plan validation result: is_valid={is_valid}, error_msg='{error_msg}'")  # Debug print
 
     return {
         **state,
@@ -259,7 +259,7 @@ def execute_node(state: OrchestratorState) -> OrchestratorState:
     """
     query_state = query_state_from_dict(state.get("query_state", {}))
     candidates = state.get("candidate_destinations", [])
-    print(f"candidates {candidates}")
+    # print(f"candidates {candidates}")
     errors = list(state.get("errors", []))
  
     # Build working state for sub-agents
@@ -302,7 +302,7 @@ def execute_node(state: OrchestratorState) -> OrchestratorState:
         )
         destination_results.append(dest)
 
-    print(f"destination_results built from traveller output: {destination_results}")
+    # print(f"destination_results built from traveller output: {destination_results}")
  
     # Run accommodation agent
     accom_state = {**sub_state, "destination_results": destination_results}
@@ -417,7 +417,7 @@ def run_orchestrator(state: dict) -> dict:
     Entry point for the main travel agent graph.
     Runs full ReWOO plan → execute → solve cycle.
     """
-    print(f"Running orchestrator with initial state: {state}")  # Debug print
+    # print(f"Running orchestrator with initial state: {state}")  # Debug print
     result = orchestrator_agent.invoke({
         "query_state":               state.get("query_state", {}),
         "semantic_memory":           state.get("semantic_memory"),
@@ -436,6 +436,7 @@ def run_orchestrator(state: dict) -> dict:
     })
  
     return {
+        "query_state":             query_state_to_dict(query_state_from_dict(state.get("query_state", {}))),
         "candidate_destinations":  result.get("candidate_destinations", []),
         "destination_results":     result.get("destination_results", []),
         "ranked_destinations":     result.get("ranked_destinations", []),

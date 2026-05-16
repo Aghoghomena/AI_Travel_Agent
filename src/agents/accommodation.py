@@ -55,7 +55,7 @@ def fetch_accommodation_node(state: AccommodationState) -> AccommodationState:
     Node 1: Returns mocked accommodation costs for each candidate
     destination. Checks episodic cache first. if new write the results into episodic memory
     """
-    print(f"the state at fetch accomodation {state}")
+    # print(f"the state at fetch accomodation {state}")
     destinations = state.get("candidate_destinations") or []
     nights = state.get("duration_nights") or 1
     episodic_memory = EpisodicMemory()
@@ -126,7 +126,7 @@ def run_accommodation_agent(state: dict) -> dict:
     Runs accommodation lookup for all candidate destinations.
     """
     query_state = state.get("query_state", QueryState())
-    print (f"the query state {query_state}")
+    # print (f"the query state {query_state}")
  
     # Derive destinations from DestinationResult objects if available,
     # so accommodation only runs for destinations that have actual flights.

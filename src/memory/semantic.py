@@ -88,7 +88,7 @@ class SemanticMemory:
     
     # ── Activity knowledge ────────────────────────────────────
 
-    def get_activity(self, destination_iata: str) -> dict | None:
+    def get_activities(self, destination_iata: str) -> dict | None:
         """Retrieves activities for a destination."""
         results = self.activities.get(where={"destination_iata": destination_iata})
         activities = []

@@ -41,7 +41,7 @@ def _parse(raw: str) -> dict | None:
 
 
 def _merge(query_state: QueryState, fields: dict) -> QueryState:
-    print(f"Merging the travellers: {query_state.travellers} on _merge")
+    # print(f"Merging the travellers: {query_state.travellers} on _merge")
     existing = {t.origin_city.lower() for t in query_state.travellers}
     for traveller in fields.get("travellers", []):
         origin = traveller.get("origin_city", "")
@@ -64,7 +64,7 @@ def _merge(query_state: QueryState, fields: dict) -> QueryState:
         query_state.duration_nights = fields["duration_nights"]
     if fields.get("region_preferences") and not query_state.region_preferences:
         query_state.region_preferences = fields["region_preferences"]
-    print(f"Merged query state: {query_state} with new fields: {fields} on _merge")
+    # print(f"Merged query state: {query_state} with new fields: {fields} on _merge")
     return query_state
 
 
@@ -86,7 +86,7 @@ def classify_node(state: IntakeState) -> IntakeState:
             f"I help groups of 1–5 people flying from different cities "
             f"find the cheapest destination to meet."
         )
-    print(f"Classify node result: status={status}, query_state={query_state}, agent_response={agent_response} on classify_node with raw={raw}")
+    # print(f"Classify node result: status={status}, query_state={query_state}, agent_response={agent_response} on classify_node with raw={raw}")
 
     return {
         **state,
@@ -105,7 +105,7 @@ def elicit_node(state: IntakeState) -> IntakeState:
     raw = llm.invoke(build_elicitation_prompt(state["user_message"], query_state, history)).content.strip()
 
     result = _parse(raw)
-    print(f"Raw elicit node output: {raw} on elicit_node")
+    # print(f"Raw elicit node output: {raw} on elicit_node")
     if result:
         query_state = _merge(query_state, result.get("updated_fields", {}))
         complete = _all_required_present(query_state)
@@ -121,7 +121,7 @@ def elicit_node(state: IntakeState) -> IntakeState:
     if question:
         new_history.append({"role": "assistant", "content": question})
 
-    print(f"Elicit node result: query_state={query_state}, question={question}, complete={complete}, turn_count={turn_count} on elicit_node with raw={raw}")
+    # print(f"Elicit node result: query_state={query_state}, question={question}, complete={complete}, turn_count={turn_count} on elicit_node with raw={raw}")
 
     return {
         **state,
@@ -138,7 +138,7 @@ def elicit_node(state: IntakeState) -> IntakeState:
 # ── Routing ───────────────────────────────────────────────────
 
 def route_after_classify(state: IntakeState) -> Literal["elicit", "end"]:
-    print(f"Routing after classify with intent_status={state.get('intent_status')} on route_after_classify")
+    # print(f"Routing after classify with intent_status={state.get('intent_status')} on route_after_classify")
     if state.get("intent_status") == IntentStatus.NEEDS_INFO:
         return "elicit"
     return "end"

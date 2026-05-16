@@ -74,12 +74,12 @@ class EpisodicMemory:
 
 
  # ── Full group search cache ───────────────────────────────
-    def get_full_group_search(self, origins: list[str], destinations: list[str], outbound_date: str, duration_nights: int) -> dict | None:
+    def get_full_group_search(self, origins: list[str], destinations: list[str], outbound_date: str, duration_nights: int, region_preferences= None) -> dict | None:
         """Returns cached full search result if available and not expired."""
         conn = get_db_connection()
         cursor = conn.cursor()
         origins_key = sort_origins_key(origins)
-        query = "SELECT * FROM episodic_searches WHERE origins_key = ? AND duration_nights = ? AND expires_at > ?"
+        query = "SELECT * FROM episodic_searches WHERE origins_key = ? AND duration_nights = ? AND expires_at > ? "
         params: list = [origins_key, duration_nights, datetime.utcnow()]
 
         if destinations:
@@ -88,25 +88,35 @@ class EpisodicMemory:
         if outbound_date:
             query += " AND outbound_date = ?"
             params.append(outbound_date)
+        if region_preferences:
+            query += " AND region_preferences = ?"
+            params.append(region_preferences)
+
+
+        query += " GROUP BY destinations ORDER BY total_usd ASC"
         
         print(f"\n[episodic] SQL: {query} | params: {params} \n")
-        row = cursor.execute(query, params).fetchone()
-        if row:
-            return {
-                "origins": row["origins_key"],
-                "destinations": json.loads(row["destinations"]),
-                "outbound_date": row["outbound_date"],
+        rows = cursor.execute(query, params).fetchall()
+        conn.close()
+        if not rows:
+            return None
+        results = [
+            {
+                "origins":         row["origins_key"],
+                "destinations":    json.loads(row["destinations"]),
+                "outbound_date":   row["outbound_date"],
                 "duration_nights": row["duration_nights"],
-                "flights": json.loads(row["flights_json"]),
-                "accommodation": json.loads(row["accommodation_json"]),
-                "total_usd": row["total_usd"],
-                "exchange_rates": json.loads(row["exchange_rates_json"]),
-                "fetched_at": row["fetched_at"],
-                "from_cache": True
+                "flights":         json.loads(row["flights_json"]),
+                "accommodation":   json.loads(row["accommodation_json"]),
+                "total_usd":       row["total_usd"],
+                "exchange_rates":  json.loads(row["exchange_rates_json"]),
+                "fetched_at":      row["fetched_at"],
             }
-        return None
+            for row in rows
+        ]
+        return results
 
-    def set_group_search(self,origins: list[str],destination: str,outbound_date: str,return_date: str,duration_nights: int,flights: list[FlightResult],accommodation: AccommodationResult,total_usd: float,exchange_rates: dict,activities: list | None = None) -> None:
+    def set_group_search(self,origins: list[str],destination: str,outbound_date: str,return_date: str,duration_nights: int,flights: list[FlightResult],accommodation: AccommodationResult,total_usd: float,exchange_rates: dict,activities: list | None = None, region_preferences="") -> None:
         """Stores a complete group search result in memory."""
         key = sort_origins_key(origins)
         now = datetime.utcnow()
@@ -135,6 +145,7 @@ class EpisodicMemory:
 
         activities_json = json.dumps(activities or [])
         conn = get_db_connection()
+        # print(f"[set_group_search] origins_key={key} destination={destination} outbound_date={outbound_date} duration_nights={duration_nights} return_date={return_date} total_usd={total_usd}")
         try:
             conn.execute("""
                 INSERT INTO episodic_searches
@@ -146,7 +157,7 @@ class EpisodicMemory:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 key, json.dumps([destination.lower()]), outbound_date, return_date,
-                "", duration_nights, flights_json, acc_json,
+                region_preferences, duration_nights, flights_json, acc_json,
                 total_usd, json.dumps(exchange_rates),
                 next((v for v in exchange_rates.values() if v is not None), 1.0),
                 activities_json, now.isoformat(), expires

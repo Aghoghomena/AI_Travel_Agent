@@ -130,11 +130,11 @@ def search_everywhere_with_specific_date(origin_iata: str,outbound_date: str, du
     Endpoint 1: Cheapest flights for a whole month using the Calendar API a week trip in the month.
     origin / destination: IATA airport codes e.g. "DUB", "LHR"
     """
-    print(outbound_date)
+
     start_date = resolve_start_date("", outbound_date)
-    print(start_date)
+
     end_date = resolve_end_date("", outbound_date, durations_nights)
-    print(end_date)
+
     params = {
         "engine": "google_travel_explore",
         "departure_id": origin_iata,
@@ -208,11 +208,8 @@ def search_region_with_specific_date(origin_iata: str,outbound_date: str, durati
     Endpoint 4: Cheapest flights for a whole month using the Calendar API a week trip in the month.
     origin / destination: IATA airport codes e.g. "DUB", "LHR"
     """
-    print(outbound_date)
     start_date = resolve_start_date("", outbound_date)
-    print(start_date)
     end_date = resolve_end_date("", outbound_date, durations_nights)
-    print(end_date)
     params = {
         "engine": "google_travel_explore",
         "departure_id": origin_iata,
@@ -262,11 +259,11 @@ def search_location_specific_date(origin_iata: str, outbound_date: str, duration
     Endpoint 4: Cheapest flights for a whole month using the Calendar API a week trip in the month.
     origin / destination: IATA airport codes e.g. "DUB", "LHR"
     """
-    print(outbound_date)
+
     start_date = resolve_start_date("", outbound_date)
-    print(start_date)
+
     end_date = resolve_end_date("", outbound_date, durations_nights)
-    print(end_date)
+
     params = {
         "engine": "google_travel_explore",
         "departure_id": origin_iata,

@@ -34,15 +34,15 @@ class ProceduralMemory:
             is_winner = dest.lower() == winning_destination.lower()
             conn.execute("""
                 INSERT INTO procedural_patterns
-                    (origins_pattern, destination, win_count,
-                     total_searches, avg_saving_usd, last_updated)
+                    (origin_pattern, destination, win_count,
+                     total_searches, avg_savings_usd, last_updated)
                 VALUES (?, ?, ?, 1, ?, ?)
-                ON CONFLICT(origins_pattern, destination)
+                ON CONFLICT(origin_pattern, destination)
                 DO UPDATE SET
                     win_count = win_count + ?,
                     total_searches = total_searches + 1,
-                    avg_saving_usd = (avg_saving_usd +
-                                     excluded.avg_saving_usd) / 2,
+                    avg_savings_usd = (avg_savings_usd +
+                                     excluded.avg_savings_usd) / 2,
                     last_updated = excluded.last_updated
             """, (
                 origin_pattern,

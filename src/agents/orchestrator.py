@@ -89,13 +89,20 @@ def validate_plan(plan_xml: str, travellers: list, candidates: list[str]) -> tup
         return False, "Plan has no steps"
 
     tools = [s.get("tool") for s in steps]
+    known_tools = {
+        "memory_read", "traveller_agent", "accommodation_agent",
+        "currency_agent", "ranker_agent", "memory_write",
+        "direct_flights_filter", "budget_filter",
+    }
 
-    # Must start with memory_read
-    for required in ("memory_read", "accommodation_agent", "currency_agent", "ranker_agent", "memory_write"):
+    for tool in tools:
+        if tool not in known_tools:
+            return False, f"Unknown tool: {tool}"
+
+    for required in ("memory_read", "currency_agent", "ranker_agent", "memory_write"):
         if required not in tools:
             return False, f"Missing required tool: {required}"
 
-    # Must have one traveller_agent step per traveller
     traveller_steps = [s for s in steps if s.get("tool") == "traveller_agent"]
     if len(traveller_steps) != len(travellers):
         return False, (
@@ -103,7 +110,6 @@ def validate_plan(plan_xml: str, travellers: list, candidates: list[str]) -> tup
             f"got {len(traveller_steps)}"
         )
 
-    # Currency must have depends_on
     currency_step = next(s for s in steps if s.get("tool") == "currency_agent")
     if not currency_step.get("depends_on", ""):
         return False, "currency_agent step missing depends_on"
@@ -153,6 +159,9 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
         travel_month=query_state.travel_month,
         duration_nights=query_state.duration_nights,
         search_mode=query_state.search_mode or "anywhere",
+        accommodation_needed=query_state.accommodation_needed,
+        max_budget_usd=query_state.max_budget_usd,
+        direct_flights_only=query_state.direct_flights_only,
     )
  
     try:
@@ -318,7 +327,7 @@ def execute_node(state: dict) -> dict:
     exchange_rates: dict = {}
     ranked_destinations: list = []
 
-    SEARCH_TOOLS = {"traveller_agent", "accommodation_agent", "currency_agent", "ranker_agent", "memory_write"}
+    SEARCH_TOOLS = {"traveller_agent", "accommodation_agent", "currency_agent", "ranker_agent", "memory_write", "direct_flights_filter", "budget_filter"}
 
     for group in order:
         for sid in group:
@@ -361,6 +370,24 @@ def execute_node(state: dict) -> dict:
                     accommodation_results = result.get("accommodation_results", [])
                     errors.extend(result.get("errors", []))
 
+                elif tool == "direct_flights_filter":
+                    # Keep only flight results where ALL travellers have a direct flight
+                    # We treat a flight as direct if outbound_flights has 1 or fewer segments
+                    def is_direct(flight) -> bool:
+                        ob = flight.outbound_flights
+                        if not ob:
+                            return True  # no segment data — assume direct
+                        segments = ob.get("segments", ob.get("itineraries", []))
+                        if isinstance(segments, list):
+                            return len(segments) <= 1
+                        return True
+
+                    filtered = [f for f in all_flight_results if is_direct(f)]
+                    if filtered:
+                        all_flight_results = filtered
+                    else:
+                        errors.append("direct_flights_filter: no direct flights found, keeping all results")
+
                 elif tool == "currency_agent":
                     flights_by_dest: dict[str, list] = {}
                     for f in all_flight_results:
@@ -400,6 +427,17 @@ def execute_node(state: dict) -> dict:
                 elif tool == "ranker_agent":
                     rank_result = run_ranker_agent({"destination_results": destination_results})
                     ranked_destinations = rank_result.get("ranked_destinations", [])
+
+                elif tool == "budget_filter":
+                    max_budget = float(step.get("max_budget_usd", 0) or 0)
+                    num_travellers = len(query_state.travellers) or 1
+                    if max_budget > 0:
+                        total_budget = max_budget * num_travellers
+                        filtered = [d for d in ranked_destinations if (d.grand_total_usd or 0) <= total_budget]
+                        if filtered:
+                            ranked_destinations = filtered
+                        else:
+                            errors.append(f"budget_filter: no destinations within ${max_budget:.0f}/person, showing all")
 
                 elif tool == "memory_write":
                     result = run_memory_write({

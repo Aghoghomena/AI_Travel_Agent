@@ -84,13 +84,23 @@ def hitl_1_node(state: dict) -> dict:
         for t in query_state.travellers
     )
     region = query_state.region_preferences or "anywhere"
- 
+
+    extras = []
+    if not query_state.accommodation_needed:
+        extras.append("  - Accommodation: not needed (handling yourselves)")
+    if query_state.max_budget_usd:
+        extras.append(f"  - Budget: up to ${query_state.max_budget_usd:,.0f} per person")
+    if query_state.direct_flights_only:
+        extras.append("  - Flights: direct only")
+    extras_block = ("\n" + "\n".join(extras)) if extras else ""
+
     message = (
         f"Here's what I have:\n"
         f"{traveller_lines}\n"
         f"  - Month: {query_state.travel_month}\n"
         f"  - Duration: {query_state.duration_nights} nights\n"
-        f"  - Region: {region}\n\n"
+        f"  - Region: {region}"
+        f"{extras_block}\n\n"
         f"Is that correct? (yes / no)"
     )
  
@@ -190,6 +200,64 @@ def hitl_2_node(state: dict) -> dict:
 
 
 
+# ── HITL Checkpoint 3 — post-plan approval ────────────────────
+
+def hitl_plan_node(state: dict) -> dict:
+    """
+    Interrupt node — shows the generated plan to the user for approval.
+    If rejected, the user can supply their own updated plan which is then
+    re-validated before execution.
+    """
+    candidates = state.get("candidate_destinations", [])
+    rewoo_plan = state.get("rewoo_plan", "")
+
+    dest_list = ", ".join(candidates) if candidates else "none"
+    message = (
+        f"Here's the search plan I've generated:\n\n"
+        f"Destinations to check: {dest_list}\n\n"
+        f"Plan:\n{rewoo_plan}\n\n"
+        f"Approve this plan? (yes / no)"
+    )
+
+    user_response = interrupt(message)
+    approved = user_response.strip().lower() in (
+        "yes", "y", "ok", "sure", "looks good", "correct", "yep", "yeah"
+    )
+
+    if approved:
+        checkpoint = HITLCheckpoint(
+            checkpoint_id="hitl_plan",
+            message=message,
+            status=HITLStatus.CONFIRMED,
+            user_response=user_response,
+        )
+        return {
+            "hitl_plan_checkpoint": checkpoint,
+            "hitl_plan_approved": True,
+        }
+
+    # Rejected — ask the user to provide their updated plan
+    edit_message = (
+        "Please provide your updated plan "
+        "(paste corrected XML or describe your changes):"
+    )
+    updated_plan = interrupt(edit_message)
+
+    checkpoint = HITLCheckpoint(
+        checkpoint_id="hitl_plan",
+        message=message,
+        status=HITLStatus.CORRECTED,
+        user_response=user_response,
+        correction={"updated_plan": updated_plan},
+    )
+
+    return {
+        "hitl_plan_checkpoint": checkpoint,
+        "hitl_plan_approved": False,
+        "rewoo_plan": updated_plan,
+    }
+
+
 # ── Conditional routing ───────────────────────────────────────
 
 def route_user_query(state: dict) -> Literal["out_of_scope", "hitl_1", "end"]:
@@ -199,6 +267,12 @@ def route_user_query(state: dict) -> Literal["out_of_scope", "hitl_1", "end"]:
     if state.get("elicitation_complete"):
         return "hitl_1"
     return "end"
+
+
+def route_hitl_plan(state: dict) -> Literal["execute", "validate_plan"]:
+    if state.get("hitl_plan_approved"):
+        return "execute"
+    return "validate_plan"
 
 
 def route_hitl_1(state: dict) -> Literal["user_query", "plan"]:
@@ -220,6 +294,7 @@ def build_graph():
     graph.add_node("validate_plan", validate_plan_node)
     graph.add_node("replan",        replan_node)
     graph.add_node("execute",       execute_node)
+    graph.add_node("hitl_plan",     hitl_plan_node)
     graph.add_node("hitl_2",        hitl_2_node)
     graph.add_node("activities",    activities_node)
 
@@ -244,7 +319,13 @@ def build_graph():
     graph.add_conditional_edges(
         "validate_plan",
         plan_valid,
-        {"execute": "execute", "replan": "replan"},
+        {"execute": "hitl_plan", "replan": "replan"},
+    )
+
+    graph.add_conditional_edges(
+        "hitl_plan",
+        route_hitl_plan,
+        {"execute": "execute", "validate_plan": "validate_plan"},
     )
 
     graph.add_conditional_edges(

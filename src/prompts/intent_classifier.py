@@ -102,6 +102,9 @@ For READY:
     "region_preferences": "Europe",
     "destination_locations": null,
     "search_mode": "region"
+    "accommodation_needed": false,
+    "max_budget_usd": 500.0,
+    "direct_flights_only": true
   }
 }
 

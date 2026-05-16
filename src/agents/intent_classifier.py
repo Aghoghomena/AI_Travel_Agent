@@ -68,6 +68,12 @@ def _merge(query_state: QueryState, fields: dict) -> QueryState:
         query_state.search_mode = fields["search_mode"]
     if fields.get("destination_locations") and not query_state.destination_locations:
         query_state.destination_locations = fields["destination_locations"]
+    if "accommodation_needed" in fields:
+        query_state.accommodation_needed = fields["accommodation_needed"]
+    if fields.get("max_budget_usd") and not query_state.max_budget_usd:
+        query_state.max_budget_usd = fields["max_budget_usd"]
+    if "direct_flights_only" in fields:
+        query_state.direct_flights_only = fields["direct_flights_only"]
     return query_state
 
 

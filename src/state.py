@@ -128,6 +128,9 @@ class QueryState:
     search_mode: str | None = None  # "specific" | "region" | "anywhere"
     # in state.py
     search_mode: str | None = None  # "specific" | "region" | "anywhere"
+    max_budget_usd: float | None = None
+    accommodation_needed: bool = True
+    direct_flights_only: bool = False
 
 
     def is_ready_for_search(self) -> bool:
@@ -229,7 +232,9 @@ class TravelAgentState(TypedDict, total=False):
     memory_write_complete: bool
     hitl_checkpoint_1: dict | None
     hitl_checkpoint_2: dict | None
+    hitl_plan_checkpoint: dict | None
     hitl_1_confirmed: bool
+    hitl_plan_approved: bool
     awaiting_hitl: bool
     rewoo_plan: str | None
     rewoo_plan_valid: bool
@@ -282,6 +287,8 @@ def create_initial_state(
         # HITL
         "hitl_checkpoint_1": None,
         "hitl_checkpoint_2": None,
+        "hitl_plan_checkpoint": None,
+        "hitl_plan_approved": False,
         "awaiting_hitl": False,
 
         # ReWOO
@@ -467,6 +474,9 @@ def query_state_to_dict(qs: QueryState) -> dict:
         "destination_locations": qs.destination_locations,
         "search_mode": qs.search_mode,
         "candidate_destinations": [],  # DestinationResult not serialised here
+        "max_budget_usd": qs.max_budget_usd,
+        "accommodation_needed": qs.accommodation_needed,
+        "direct_flights_only": qs.direct_flights_only,
     }
  
  
@@ -508,5 +518,8 @@ def query_state_from_dict(d: dict) -> QueryState:
     qs.region_preferences  = d.get("region_preferences")
     qs.destination_locations = d.get("destination_locations") or []
     qs.search_mode         = d.get("search_mode")
+    qs.max_budget_usd      = d.get("max_budget_usd")
+    qs.accommodation_needed = d.get("accommodation_needed", True)
+    qs.direct_flights_only  = d.get("direct_flights_only", False)
     return qs
  

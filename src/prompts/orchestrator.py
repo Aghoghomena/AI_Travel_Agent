@@ -76,6 +76,17 @@ With budget $400/person and direct flights only, no accommodation:
 """
 
 
+def build_replan_prompt(current_plan: str, user_feedback: str) -> str:
+    return (
+        ORCHESTRATOR_PROMPT
+        + f"CURRENT PLAN:\n{current_plan}\n\n"
+        f"USER FEEDBACK (you MUST apply this exactly — do not ignore any instruction):\n"
+        f"  {user_feedback}\n\n"
+        f"Output the updated plan XML incorporating the feedback. "
+        f"Keep all unchanged steps identical.\nOutput:"
+    )
+
+
 def build_orchestrator_prompt(
     travellers: list,
     candidate_destinations: list[str],
@@ -85,6 +96,7 @@ def build_orchestrator_prompt(
     accommodation_needed: bool = True,
     max_budget_usd: float | None = None,
     direct_flights_only: bool = False,
+    user_feedback: str | None = None,
 ) -> str:
     traveller_lines = "\n".join(
         f"  - {t.name} ({t.origin_iata})" for t in travellers
@@ -104,5 +116,11 @@ def build_orchestrator_prompt(
         f"Nights: {duration_nights}\n"
         f"Constraints: {', '.join(constraints)}\n"
     )
+
+    if user_feedback:
+        context += (
+            f"\nUSER FEEDBACK ON PREVIOUS PLAN (you must follow this):\n"
+            f"  {user_feedback}\n"
+        )
 
     return ORCHESTRATOR_PROMPT + context + "\nOutput:"

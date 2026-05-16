@@ -13,7 +13,7 @@ LangGraph node: run_orchestrator(state) -> dict
 import xml.etree.ElementTree as ET
 from typing import Literal
  
-from src.prompts.orchestrator import build_orchestrator_prompt
+from src.prompts.orchestrator import build_orchestrator_prompt, build_replan_prompt
 from src.agents.traveller import run_traveller_agent
 from src.agents.accommodation import run_accommodation_agent
 from src.agents.currency import run_currency_agent
@@ -37,7 +37,7 @@ def get_candidate_destinations(semantic_memory: SemanticMemory, region_preferenc
 
     # Map region_preferences to semantic query
     if semantic_memory is None:
-        candidates = ["Turkey", "Portugal", "Netherlands", "United Kingdom", "Kenya", "Ghana"]
+        candidates = ["IST", "LIS", "AMS", "LHR", "NBO", "ACC"]
     else:
         region_lower = (region_preferences or "").lower().strip()
 
@@ -64,7 +64,7 @@ def get_candidate_destinations(semantic_memory: SemanticMemory, region_preferenc
         ]
 
         if not candidates:
-            candidates = ["Turkey", "Portugal", "Netherlands", "United Kingdom", "Kenya", "Ghana"]
+            candidates = ["IST", "LIS", "AMS", "LHR", "NBO", "ACC"]
 
     if prioritised_destinations:
         winners = [d for d in prioritised_destinations if d in candidates]
@@ -162,7 +162,10 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
         accommodation_needed=query_state.accommodation_needed,
         max_budget_usd=query_state.max_budget_usd,
         direct_flights_only=query_state.direct_flights_only,
+        user_feedback=state.get("hitl_plan_feedback"),
     )
+
+    print(f"\n {candidates} \n")
  
     try:
         response = llm.invoke(prompt)
@@ -205,7 +208,7 @@ def validate_plan_node(state: OrchestratorState) -> OrchestratorState:
         candidates=state.get("candidate_destinations", []),
     )
 
-    # print(f"Plan validation result: is_valid={is_valid}, error_msg='{error_msg}'")  # Debug print
+    print(f"[validate_plan_node] is_valid={is_valid}, error_msg='{error_msg}'")
 
     return {
         **state,
@@ -215,11 +218,51 @@ def validate_plan_node(state: OrchestratorState) -> OrchestratorState:
 
 def replan_node(state: OrchestratorState) -> OrchestratorState:
     """
-    Node 3: Re-plans once on validation failure.
-    On second failure falls back to a hardcoded minimal plan.
+    Node 3: Re-plans using LLM.
+
+    When triggered by HITL feedback: passes the current plan + user feedback
+    to the LLM so it updates the plan in place (no candidate re-fetch).
+    When triggered by validation failure: falls back to a hardcoded minimal plan
+    after two attempts.
     """
     replan_count = state.get("replan_count", 0) + 1
- 
+    errors = list(state.get("errors", []))
+
+    # HITL-driven replan: LLM updates the existing plan with user feedback
+    hitl_feedback = state.get("hitl_plan_feedback")
+    print(f"the hitl feedback {hitl_feedback}")
+    current_plan = state.get("rewoo_plan", "")
+    if hitl_feedback and current_plan:
+        try:
+            prompt = build_replan_prompt(current_plan, hitl_feedback)
+            response = llm.invoke(prompt)
+            print(f"\n the replanned output {response} \n")
+            raw = response.content.strip()
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                raw = parts[1] if len(parts) > 1 else raw
+                if raw.startswith("xml"):
+                    raw = raw[3:]
+            raw = raw.strip()
+            print(f"\n the replanned output {response} \n")
+
+            # Extract the updated destination list from the new plan XML
+            updated_candidates = _extract_destinations_from_plan(raw)
+
+            return {
+                **state,
+                "replan_count": replan_count,
+                "rewoo_plan": raw,
+                "rewoo_plan_valid": True,
+                "candidate_destinations": updated_candidates,
+                "hitl_plan_feedback": None,       # consumed
+                "hitl_plan_approved": None,       # force hitl_plan to re-show
+                "hitl_replan_complete": True,      # route to hitl_plan not execute
+                "errors": errors,
+            }
+        except Exception as exc:
+            errors.append(f"replan_node LLM error: {exc}")
+
     if replan_count >= 2:
         # Build fallback plan directly
         query_state = query_state_from_dict(state.get("query_state", {}))
@@ -256,10 +299,27 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
             "replan_count": replan_count,
             "rewoo_plan": fallback_plan,
             "rewoo_plan_valid": True,
+            "errors": errors,
         }
- 
-    # Re-call plan_node logic
-    return {**state, "replan_count": replan_count, "rewoo_plan_valid": False}
+
+    # Validation failure replan — loop back to plan_node
+    return {**state, "replan_count": replan_count, "rewoo_plan_valid": False, "errors": errors}
+
+def _extract_destinations_from_plan(plan_xml: str) -> list[str]:
+    """Reads all unique destinations attributes from traveller_agent steps in the plan."""
+    try:
+        root = ET.fromstring(plan_xml.strip())
+        seen: dict[str, bool] = {}
+        for step in root.findall("step"):
+            if step.get("tool") == "traveller_agent":
+                for dest in (step.get("destinations") or "").split(","):
+                    dest = dest.strip()
+                    if dest:
+                        seen[dest] = True
+        return list(seen.keys())
+    except Exception:
+        return []
+
 
 def _parse_steps(plan_xml: str) -> dict[str, ET.Element]:
     """Returns {step_id: element} from the plan XML."""
@@ -470,7 +530,10 @@ def plan_valid(state: dict) -> Literal["execute", "replan"]:
     return "execute" if state.get("rewoo_plan_valid") else "replan"
 
 
-def replan_or_execute(state: dict) -> Literal["plan", "execute"]:
+def replan_or_execute(state: dict) -> Literal["plan", "execute", "hitl_plan"]:
+    print(f"[replan_or_execute] hitl_replan_complete={state.get('hitl_replan_complete')} rewoo_plan_valid={state.get('rewoo_plan_valid')} replan_count={state.get('replan_count')}")
+    if state.get("hitl_replan_complete"):
+        return "hitl_plan"
     if state.get("rewoo_plan_valid") or state.get("replan_count", 0) >= 2:
         return "execute"
     return "plan"

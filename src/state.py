@@ -233,13 +233,18 @@ class TravelAgentState(TypedDict, total=False):
     hitl_checkpoint_1: dict | None
     hitl_checkpoint_2: dict | None
     hitl_plan_checkpoint: dict | None
+    hitl_plan_feedback: str | None
     hitl_1_confirmed: bool
     hitl_plan_approved: bool
     awaiting_hitl: bool
+    hitl_replan_complete: bool
     rewoo_plan: str | None
     rewoo_plan_valid: bool
     current_step: str | None
     past_searches_summary: str | None
+    hitl_plan_approved: bool | None = None
+    hitl_plan_feedback: str | None = None
+    hitl_replan_complete: bool = False
     errors: list
 
 
@@ -288,8 +293,10 @@ def create_initial_state(
         "hitl_checkpoint_1": None,
         "hitl_checkpoint_2": None,
         "hitl_plan_checkpoint": None,
+        "hitl_plan_feedback": None,
         "hitl_plan_approved": False,
         "awaiting_hitl": False,
+        "hitl_replan_complete": False,
 
         # ReWOO
         "rewoo_plan": None,
@@ -410,6 +417,9 @@ class OrchestratorState(dict):
     exchange_rates: dict
     ranked_destinations: list
     errors: list[str]
+    hitl_plan_feedback: str | None
+    hitl_plan_approved: bool | None
+    hitl_replan_complete: bool
 
 # ── Internal state for this agent's graph ────────────────────
 class CurrencyState(dict):

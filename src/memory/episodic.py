@@ -95,7 +95,7 @@ class EpisodicMemory:
 
         query += " GROUP BY destinations ORDER BY total_usd ASC"
         
-        # print(f"\n[episodic] SQL: {query} | params: {params} \n")
+        print(f"\n[episodic] SQL: {query} | params: {params} \n")
         rows = cursor.execute(query, params).fetchall()
         conn.close()
         if not rows:

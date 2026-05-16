@@ -18,6 +18,7 @@ accommodation_agent, currency_agent, ranker_agent, memory_write).
 execute_node follows the plan exactly.
 """
 
+import xml.etree.ElementTree as ET
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
@@ -26,7 +27,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from src.agents.intent_classifier import handle_user_query
 from src.agents.orchestrator import (
     plan_node, validate_plan_node, replan_node, execute_node,
-    plan_valid, replan_or_execute,
+    plan_valid,
 )
 from src.agents.activities import run_activities_agent
 from src.state import (
@@ -202,21 +203,73 @@ def hitl_2_node(state: dict) -> dict:
 
 # ── HITL Checkpoint 3 — post-plan approval ────────────────────
 
+def _step_label(step: ET.Element) -> str:
+    tool = step.get("tool", "")
+    if tool == "memory_read":
+        return "Check past searches for cached results"
+    if tool == "traveller_agent":
+        name = step.get("traveller", "")
+        origin = step.get("origin", "")
+        dests = step.get("destinations", "").replace(",", ", ")
+        return f"Find flights for {name} ({origin} → {dests})"
+    if tool == "accommodation_agent":
+        dests = step.get("destinations", "").replace(",", ", ")
+        return f"Find hotels in {dests}"
+    if tool == "currency_agent":
+        return "Convert all prices to USD"
+    if tool == "ranker_agent":
+        return "Rank destinations by total group cost"
+    if tool == "memory_write":
+        return "Save results for next time"
+    return tool
+
+
+def _execution_groups(steps: dict) -> list[list[str]]:
+    groups, completed, remaining = [], set(), set(steps)
+    while remaining:
+        ready = [
+            sid for sid in remaining
+            if all(d.strip() in completed for d in steps[sid].get("depends_on", "").split(",") if d.strip())
+        ]
+        if not ready:
+            break
+        groups.append(ready)
+        completed.update(ready)
+        remaining -= set(ready)
+    return groups
+
+
+def _format_plan_steps(plan_xml: str) -> str:
+    try:
+        root = ET.fromstring(plan_xml.strip())
+        steps = {s.get("id"): s for s in root.findall("step")}
+        groups = _execution_groups(steps)
+        lines = []
+        for group in groups:
+            labels = [_step_label(steps[sid]) for sid in group if sid in steps]
+            if len(labels) == 1:
+                lines.append(f"  • {labels[0]}")
+            else:
+                lines.append(f"  • Simultaneously:")
+                for label in labels:
+                    lines.append(f"      · {label}")
+        return "\n".join(lines) if lines else "  (no steps found)"
+    except ET.ParseError:
+        return "  (could not parse plan)"
+
+
 def hitl_plan_node(state: dict) -> dict:
     """
-    Interrupt node — shows the generated plan to the user for approval.
-    If rejected, the user can supply their own updated plan which is then
-    re-validated before execution.
+    Interrupt node 3a — shows the plan steps and asks for approval (single interrupt).
     """
-    candidates = state.get("candidate_destinations", [])
-    rewoo_plan = state.get("rewoo_plan", "")
+    plan_xml = state.get("rewoo_plan", "")
+    print(f"[hitl_plan_node] rewoo_plan starts with: {plan_xml[:80]!r}")
+    steps_summary = _format_plan_steps(plan_xml)
 
-    dest_list = ", ".join(candidates) if candidates else "none"
     message = (
-        f"Here's the search plan I've generated:\n\n"
-        f"Destinations to check: {dest_list}\n\n"
-        f"Plan:\n{rewoo_plan}\n\n"
-        f"Approve this plan? (yes / no)"
+        f"Here's my search plan:\n\n"
+        f"{steps_summary}\n\n"
+        f"Approve? (yes / no)"
     )
 
     user_response = interrupt(message)
@@ -224,37 +277,46 @@ def hitl_plan_node(state: dict) -> dict:
         "yes", "y", "ok", "sure", "looks good", "correct", "yep", "yeah"
     )
 
-    if approved:
-        checkpoint = HITLCheckpoint(
-            checkpoint_id="hitl_plan",
-            message=message,
-            status=HITLStatus.CONFIRMED,
-            user_response=user_response,
-        )
-        return {
-            "hitl_plan_checkpoint": checkpoint,
-            "hitl_plan_approved": True,
-        }
-
-    # Rejected — ask the user to provide their updated plan
-    edit_message = (
-        "Please provide your updated plan "
-        "(paste corrected XML or describe your changes):"
-    )
-    updated_plan = interrupt(edit_message)
-
     checkpoint = HITLCheckpoint(
         checkpoint_id="hitl_plan",
         message=message,
-        status=HITLStatus.CORRECTED,
+        status=HITLStatus.CONFIRMED if approved else HITLStatus.CORRECTED,
         user_response=user_response,
-        correction={"updated_plan": updated_plan},
     )
-
     return {
         "hitl_plan_checkpoint": checkpoint,
-        "hitl_plan_approved": False,
-        "rewoo_plan": updated_plan,
+        "hitl_plan_approved": approved,
+        "hitl_replan_complete": False,
+        "query_state": state.get("query_state"),
+    }
+
+
+def hitl_plan_feedback_node(state: dict) -> dict:
+    """
+    Interrupt node 3b — collects plain-text feedback after rejection (single interrupt).
+    Only reached when hitl_plan_approved=False.
+    """
+    feedback_message = (
+        "What would you like changed?\n"
+        "  e.g. 'Remove Lisbon'\n"
+        "       'Add Tokyo and Seoul'\n"
+        "       'No accommodation'\n"
+        "       'Direct flights only'\n"
+        "       'Max budget $400 per person'\n"
+        "       'Only European cities'\n"
+        "       \"Don't check cache\"\n"
+        "       \"Don't save results\"\n"
+    )
+    feedback = interrupt(feedback_message)
+
+    cp = state.get("hitl_plan_checkpoint")
+    if isinstance(cp, HITLCheckpoint):
+        cp.correction = {"feedback": feedback}
+
+    print(f"[hitl_plan_feedback_node] feedback captured: {feedback!r}")  # ← add thi
+    return {
+        "hitl_plan_checkpoint": cp,
+        "hitl_plan_feedback": feedback,
     }
 
 
@@ -269,11 +331,13 @@ def route_user_query(state: dict) -> Literal["out_of_scope", "hitl_1", "end"]:
     return "end"
 
 
-def route_hitl_plan(state: dict) -> Literal["execute", "validate_plan"]:
-    if state.get("hitl_plan_approved"):
+def route_hitl_plan(state: dict) -> Literal["execute", "hitl_plan_feedback"]:
+    approved = state.get("hitl_plan_approved")
+    if approved is True:
         return "execute"
-    return "validate_plan"
-
+    if approved is False:
+        return "hitl_plan_feedback"
+    return "execute"  # None = just replanned, go to execute
 
 def route_hitl_1(state: dict) -> Literal["user_query", "plan"]:
     cp = state.get("hitl_checkpoint_1")
@@ -290,12 +354,13 @@ def build_graph():
     graph.add_node("user_query",    handle_user_query_node)
     graph.add_node("out_of_scope",  out_of_scope_node)
     graph.add_node("hitl_1",        hitl_1_node)
-    graph.add_node("plan",          plan_node)
-    graph.add_node("validate_plan", validate_plan_node)
-    graph.add_node("replan",        replan_node)
-    graph.add_node("execute",       execute_node)
-    graph.add_node("hitl_plan",     hitl_plan_node)
-    graph.add_node("hitl_2",        hitl_2_node)
+    graph.add_node("plan",               plan_node)
+    graph.add_node("validate_plan",      validate_plan_node)
+    graph.add_node("replan",             replan_node)
+    graph.add_node("execute",            execute_node)
+    graph.add_node("hitl_plan",          hitl_plan_node)
+    graph.add_node("hitl_plan_feedback", hitl_plan_feedback_node)
+    graph.add_node("hitl_2",             hitl_2_node)
     graph.add_node("activities",    activities_node)
 
     graph.add_edge(START, "user_query")
@@ -325,14 +390,12 @@ def build_graph():
     graph.add_conditional_edges(
         "hitl_plan",
         route_hitl_plan,
-        {"execute": "execute", "validate_plan": "validate_plan"},
+        {"execute": "execute", "hitl_plan_feedback": "hitl_plan_feedback"},
     )
 
-    graph.add_conditional_edges(
-        "replan",
-        replan_or_execute,
-        {"plan": "plan", "execute": "execute"},
-    )
+    graph.add_edge("hitl_plan_feedback", "replan")
+
+    graph.add_edge("replan", "validate_plan")
 
     graph.add_edge("execute",    "hitl_2")
     graph.add_edge("hitl_2",     "activities")

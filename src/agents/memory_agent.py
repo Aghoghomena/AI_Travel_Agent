@@ -71,7 +71,7 @@ def check_episodic_node(state: MemoryReadState) -> MemoryReadState:
     ]
  
     cached = episodic.get_full_group_search(origins, dest_iatas, outbound_date, nights,  region_preferences=query_state.region_preferences or "")
-    print(f"output of search episodic memory {cached}")
+    # print(f"output of search episodic memory {cached}")
     if cached:
         return {**state, "cache_hit": True, "cached_result": cached}
  

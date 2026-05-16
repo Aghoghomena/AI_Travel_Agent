@@ -1,55 +1,58 @@
 """
 Main LangGraph graph.
- 
-Wires all agents together with routing, fan-out for travellers,
-and two inline HITL interrupt checkpoints.
- 
+
+Wires all agents together with routing and two inline HITL interrupt checkpoints.
+
 Flow:
   START
-    → intent_classifier
+    → user_query
     → OUT_OF_SCOPE: END
     → NEEDS_INFO:   elicitation (interrupt loop) → END
     → READY:        hitl_1
-      → CORRECTED:  elicitation → hitl_1 (loop)
-      → CONFIRMED:  memory_read
-        → cache HIT:  hitl_2 → activities → END
-        → cache MISS: orchestrator → memory_write → hitl_2 → activities → END
+      → CORRECTED:  user_query (loop)
+      → CONFIRMED:  plan
+          → validate_plan → [replan →] execute → hitl_2 → activities → END
+
+The ReWOO plan decides which tools to run (memory_read, traveller_agent,
+accommodation_agent, currency_agent, ranker_agent, memory_write).
+execute_node follows the plan exactly.
 """
- 
-import operator
-from typing import Annotated, Literal
+
+from typing import Literal
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt, Send
+from langgraph.types import interrupt
 from langgraph.checkpoint.memory import MemorySaver
- 
+
 from src.agents.intent_classifier import handle_user_query
-from src.agents.orchestrator import run_orchestrator
-from src.agents.memory_agent import run_memory_read, run_memory_write
+from src.agents.orchestrator import (
+    plan_node, validate_plan_node, replan_node, execute_node,
+    plan_valid, replan_or_execute,
+)
 from src.agents.activities import run_activities_agent
 from src.state import (
     IntentStatus, HITLCheckpoint,
-    HITLStatus, QueryState, query_state_from_dict, query_state_to_dict
+    HITLStatus, QueryState, query_state_from_dict, query_state_to_dict,TravelAgentState
 )
 
 
 # ── Node functions ────────────────────────────────────────────
 
 def handle_user_query_node(state: dict) -> dict:
-    return handle_user_query(state)
+    result = handle_user_query(state)
+    intent = result.get("intent_status")
+    return {
+        "intent_status":        intent.value if isinstance(intent, IntentStatus) else intent,
+        "query_state":          result.get("query_state"),
+        "agent_response":       result.get("agent_response"),
+        "elicitation_question": result.get("elicitation_question"),
+        "elicitation_complete": result.get("elicitation_complete", False),
+        "turn_limit_reached":   result.get("turn_limit_reached", False),
+        "conversation_history": result.get("conversation_history", []),
+        "turn_count":           result.get("turn_count", 0),
+    }
 
- 
-def memory_read_node(state: dict) -> dict:
-    return run_memory_read(state)
- 
- 
-def orchestrator_node(state: dict) -> dict:
-    return run_orchestrator(state)
- 
- 
-def memory_write_node(state: dict) -> dict:
-    return run_memory_write(state)
- 
- 
+
+
 def activities_node(state: dict) -> dict:
     return run_activities_agent(state)
  
@@ -190,107 +193,70 @@ def hitl_2_node(state: dict) -> dict:
 # ── Conditional routing ───────────────────────────────────────
 
 def route_user_query(state: dict) -> Literal["out_of_scope", "hitl_1", "end"]:
+    print(f"\n state at 184 {state} \n")
     if state.get("intent_status") == IntentStatus.OUT_OF_SCOPE:
         return "out_of_scope"
     if state.get("elicitation_complete"):
         return "hitl_1"
     return "end"
- 
-def route_hitl_1(state: dict) -> Literal["user_query", "memory_read"]:
+
+
+def route_hitl_1(state: dict) -> Literal["user_query", "plan"]:
     cp = state.get("hitl_checkpoint_1")
-    print(f"\n Routing HITL 1 with state: {state} on route_hitl_1 and corrected is {cp.status == HITLStatus.CORRECTED if cp else False}\n") 
     if cp and cp.status == HITLStatus.CORRECTED:
         return "user_query"
-    return "memory_read"
- 
- 
-def route_memory_read(state: dict) -> Literal["hitl_2", "orchestrator"]:
-    if state.get("episodic_cache_hit"):
-        return "hitl_2"
-    return "orchestrator"
- 
- 
-# ── Fan-out: one traveller node per traveller ─────────────────
- 
-def fan_out_travellers(state: dict) -> list[Send]:
-    """
-    Dynamically creates one Send per traveller for parallel execution.
-    Each traveller node runs run_traveller_agent independently.
-    Results are merged via operator.add on flight_results.
-    NOTE: This is used when the orchestrator is split into separate
-    graph nodes (advanced wiring). For MVP the orchestrator handles
-    fan-out internally. This function is provided for Step 14 extension.
-    """
-    from src.agents.traveller import run_traveller_agent
-    query_state = query_state_from_dict(state.get("query_state", {}))
-    return [
-        Send("traveller_node", {**state, "current_traveller": t})
-        for t in query_state.travellers
-    ]
- 
- 
+    return "plan"
+
 
 # ── Build the main graph ──────────────────────────────────────
- 
+
 def build_graph():
-    graph = StateGraph(dict)
- 
-    # Add all nodes
-    graph.add_node("user_query", handle_user_query_node)
-    graph.add_node("out_of_scope",      out_of_scope_node)
-    graph.add_node("hitl_1",            hitl_1_node)
-    graph.add_node("memory_read",       memory_read_node)
-    graph.add_node("orchestrator",      orchestrator_node)
-    graph.add_node("memory_write",      memory_write_node)
-    graph.add_node("hitl_2",            hitl_2_node)
-    graph.add_node("activities",        activities_node)
- 
-    # Entry point
+    graph = StateGraph(TravelAgentState)
+
+    graph.add_node("user_query",    handle_user_query_node)
+    graph.add_node("out_of_scope",  out_of_scope_node)
+    graph.add_node("hitl_1",        hitl_1_node)
+    graph.add_node("plan",          plan_node)
+    graph.add_node("validate_plan", validate_plan_node)
+    graph.add_node("replan",        replan_node)
+    graph.add_node("execute",       execute_node)
+    graph.add_node("hitl_2",        hitl_2_node)
+    graph.add_node("activities",    activities_node)
+
     graph.add_edge(START, "user_query")
- 
-    # Intent routing
+
     graph.add_conditional_edges(
         "user_query",
         route_user_query,
-        {
-            "out_of_scope": "out_of_scope",
-            "hitl_1":       "hitl_1",
-            "end":           END,
-        },
+        {"out_of_scope": "out_of_scope", "hitl_1": "hitl_1", "end": END},
     )
 
- 
-    # Out of scope → END
     graph.add_edge("out_of_scope", END)
- 
-    # HITL 1 routing
+
     graph.add_conditional_edges(
         "hitl_1",
         route_hitl_1,
-        {
-            "user_query":  "user_query",
-            "memory_read":  "memory_read",
-        },
+        {"user_query": "user_query", "plan": "plan"},
     )
- 
-    # Memory read routing
+
+    graph.add_edge("plan", "validate_plan")
+
     graph.add_conditional_edges(
-        "memory_read",
-        route_memory_read,
-        {
-            "hitl_2":      "hitl_2",
-            "orchestrator": "orchestrator",
-        },
+        "validate_plan",
+        plan_valid,
+        {"execute": "execute", "replan": "replan"},
     )
- 
-    # Search path
-    graph.add_edge("orchestrator",  "memory_write")
-    graph.add_edge("memory_write",  "hitl_2")
- 
-    # HITL 2 → activities → END
-    graph.add_edge("hitl_2",       "activities")
-    graph.add_edge("activities",   END)
- 
+
+    graph.add_conditional_edges(
+        "replan",
+        replan_or_execute,
+        {"plan": "plan", "execute": "execute"},
+    )
+
+    graph.add_edge("execute",    "hitl_2")
+    graph.add_edge("hitl_2",     "activities")
+    graph.add_edge("activities", END)
+
     return graph.compile(checkpointer=MemorySaver())
  
  

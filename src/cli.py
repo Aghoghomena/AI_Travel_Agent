@@ -11,6 +11,7 @@ Usage:
 """
 
 import uuid
+import xml.etree.ElementTree as ET
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -31,6 +32,68 @@ console = Console()
 
 
 # ── Output formatting ─────────────────────────────────────────
+
+def _step_label(step: ET.Element) -> str:
+    tool = step.get("tool", "")
+    if tool == "memory_read":
+        return "Check past searches for cached results"
+    if tool == "traveller_agent":
+        name = step.get("traveller", "")
+        origin = step.get("origin", "")
+        dests = step.get("destinations", "").replace(",", ", ")
+        return f"Find flights for {name} ({origin} → {dests})"
+    if tool == "accommodation_agent":
+        dests = step.get("destinations", "").replace(",", ", ")
+        return f"Find hotels in {dests}"
+    if tool == "currency_agent":
+        return "Convert all prices to USD"
+    if tool == "ranker_agent":
+        return "Rank destinations by total group cost"
+    if tool == "memory_write":
+        return "Save results for next time"
+    return tool
+
+
+def _execution_groups(steps: dict) -> list[list[str]]:
+    groups, completed, remaining = [], set(), set(steps)
+    while remaining:
+        ready = [
+            sid for sid in remaining
+            if all(d.strip() in completed for d in steps[sid].get("depends_on", "").split(",") if d.strip())
+        ]
+        if not ready:
+            break
+        groups.append(ready)
+        completed.update(ready)
+        remaining -= set(ready)
+    return groups
+
+
+def print_plan(plan_xml: str):
+    try:
+        root = ET.fromstring(plan_xml.strip())
+    except ET.ParseError:
+        return
+
+    steps = {s.get("id"): s for s in root.findall("step")}
+    groups = _execution_groups(steps)
+
+    lines = []
+    for group in groups:
+        labels = [_step_label(steps[sid]) for sid in group if sid in steps]
+        if len(labels) == 1:
+            lines.append(f"  • {labels[0]}")
+        else:
+            lines.append(f"  • Simultaneously:")
+            for label in labels:
+                lines.append(f"      · {label}")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title="[bold cyan]Here's what I'm going to do[/bold cyan]",
+        box=box.ROUNDED,
+    ))
+
 
 def print_agent(message: str):
     console.print(f"\n[cyan]Agent:[/cyan] {message}\n")
@@ -134,8 +197,9 @@ def main():
         "user_message":         "",
         "agent_response":       None,
         "intent_status":        None,
-        "query_state":          [],
+        "query_state":          {},
         "elicitation_complete": False,
+        "elicitation_question": None, 
         "flight_results":       [],
         "accommodation_results":[],
         "destination_results":  [],
@@ -165,76 +229,59 @@ def main():
  
         try:
             if interrupted:
-                # Graph is paused at interrupt() — resume with user's response
-                result = travel_agent_graph.invoke(
-                    Command(resume=user_input),
-                    config=config,
-                )
+                travel_agent_graph.invoke(Command(resume=user_input), config=config)
             else:
-                # Normal invoke — new user message
                 state["user_message"] = user_input
-                result = travel_agent_graph.invoke(state, config=config)
- 
+                travel_agent_graph.invoke(state, config=config)
+
+            # Always read real state from checkpointer
+            result = travel_agent_graph.get_state(config)
+            interrupt_data = result.interrupts  # ← interrupts live here on StateSnapshot
+            interrupted = bool(interrupt_data)
+            values = result.values  # ← actual state values
+
+            # Show the plan the first time it appears, regardless of interrupt state
+            plan = values.get("rewoo_plan")
+            if plan and plan != state.get("rewoo_plan"):
+                print_plan(plan)
+
+            if interrupted:
+                message = interrupt_data[0].value if interrupt_data else ""
+                print_agent(message)
+            else:
+                intent = values.get("intent_status")
+
+                if intent == "out_of_scope":
+                    print_agent(values.get("agent_response", ""))
+                elif values.get("elicitation_question") and not values.get("elicitation_complete"):
+                    print_agent(values["elicitation_question"])
+                elif values.get("activities_fetched"):
+                    print_results(values.get("ranked_destinations", []), values.get("activities", {}))
+                    break
+                elif values.get("ranked_destinations"):
+                    print_results(values.get("ranked_destinations", []), values.get("activities", {}))
+                elif values.get("agent_response"):
+                    print_agent(values["agent_response"])
+
+                if values.get("errors"):
+                    for e in values["errors"]:
+                        if e:
+                            console.print(f"[red]⚠[/red]  [dim]{e}[/dim]")
+
+        except GraphInterrupt as gi:
+            interrupted = True
+            message = gi.args[0][0].value if gi.args and gi.args[0] else ""
+            print_agent(message)
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             interrupted = False
-            continue
- 
-        # Always merge non-interrupt state first
-        interrupt_data = result.get("__interrupt__")
-        interrupted = bool(interrupt_data)
- 
-        # Merge result into state — never overwrite with None or empty values
-        for k, v in result.items():
-            if k == "__interrupt__":
-                continue
-            if v is None and state.get(k) is not None:
-                continue
-            if v == [] and state.get(k):
-                continue
-            if v == {} and state.get(k):
-                continue
-            state[k] = v
- 
-        if interrupted:
-            # Graph paused at interrupt() — surface the message
-            message = interrupt_data[0].value if interrupt_data else ""
-            print_agent(message)
-        else:
-            # Graph ran to completion this turn
-            intent = result.get("intent_status")
- 
-            if intent == IntentStatus.OUT_OF_SCOPE:
-                print_agent(result.get("agent_response", ""))
- 
-            elif result.get("elicitation_question") and not result.get("elicitation_complete"):
-                print_agent(result["elicitation_question"])
- 
-            elif result.get("activities_fetched"):
-                if result.get("past_searches_summary"):
-                    console.print(f"\n[dim]{result['past_searches_summary']}[/dim]")
-                print_results(
-                    result.get("ranked_destinations", []),
-                    result.get("activities", {}),
-                )
-                break
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Goodbye.[/dim]")
+            break
+            
 
-            elif result.get("ranked_destinations"):
-                if result.get("past_searches_summary"):
-                    console.print(f"\n[dim]{result['past_searches_summary']}[/dim]")
-                print_results(
-                    result.get("ranked_destinations", []),
-                    result.get("activities", {}),
-                )
-
- 
-            elif result.get("agent_response"):
-                print_agent(result["agent_response"])
- 
-            if result.get("errors"):
-                for e in result["errors"]:
-                    if e:
-                        console.print(f"[red]⚠[/red]  [dim]{e}[/dim]")
+            
+            
  
  
 if __name__ == "__main__":

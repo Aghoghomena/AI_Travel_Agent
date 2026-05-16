@@ -12,7 +12,6 @@ LangGraph node: run_orchestrator(state) -> dict
 
 import xml.etree.ElementTree as ET
 from typing import Literal
-from langgraph.graph import StateGraph, START, END
  
 from src.prompts.orchestrator import build_orchestrator_prompt
 from src.agents.traveller import run_traveller_agent
@@ -20,10 +19,9 @@ from src.agents.accommodation import run_accommodation_agent
 from src.agents.currency import run_currency_agent
 from src.agents.ranker import run_ranker_agent
 from src.memory.semantic import SemanticMemory
-from src.memory.episodic import EpisodicMemory
 from src.state import QueryState, DestinationResult, Traveller
 from src.utils.config import llm
-from src.state import OrchestratorState, query_state_from_dict, query_state_to_dict
+from src.state import OrchestratorState, query_state_from_dict
 
 # ── Tools ─────────────────────────────────────────────────────
 
@@ -85,13 +83,18 @@ def validate_plan(plan_xml: str, travellers: list, candidates: list[str]) -> tup
         root = ET.fromstring(plan_xml.strip())
     except ET.ParseError as e:
         return False, f"XML parse error: {e}"
- 
+
     steps = root.findall("step")
     if not steps:
         return False, "Plan has no steps"
- 
+
     tools = [s.get("tool") for s in steps]
- 
+
+    # Must start with memory_read
+    for required in ("memory_read", "accommodation_agent", "currency_agent", "ranker_agent", "memory_write"):
+        if required not in tools:
+            return False, f"Missing required tool: {required}"
+
     # Must have one traveller_agent step per traveller
     traveller_steps = [s for s in steps if s.get("tool") == "traveller_agent"]
     if len(traveller_steps) != len(travellers):
@@ -99,18 +102,12 @@ def validate_plan(plan_xml: str, travellers: list, candidates: list[str]) -> tup
             f"Expected {len(travellers)} traveller_agent steps, "
             f"got {len(traveller_steps)}"
         )
- 
-    # Must have accommodation, currency, ranker
-    for required in ("accommodation_agent", "currency_agent", "ranker_agent"):
-        if required not in tools:
-            return False, f"Missing required tool: {required}"
- 
-    # Currency must depend on traveller + accommodation steps
+
+    # Currency must have depends_on
     currency_step = next(s for s in steps if s.get("tool") == "currency_agent")
-    depends_on = currency_step.get("depends_on", "")
-    if not depends_on:
+    if not currency_step.get("depends_on", ""):
         return False, "currency_agent step missing depends_on"
- 
+
     return True, ""
  
   
@@ -158,18 +155,20 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
         search_mode=query_state.search_mode or "anywhere",
     )
  
-    response = llm.invoke(prompt)
-    raw = response.content.strip()
-    # print(f"LLM raw response for plan_node at orchestrator.py:\n{raw}\n")  # Debug print
+    try:
+        response = llm.invoke(prompt)
+        raw = response.content.strip()
+        # Strip accidental markdown fences
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("xml"):
+                raw = raw[3:]
+        raw = raw.strip()
+    except Exception as exc:
+        errors.append(f"plan_node LLM error: {exc}")
+        raw = ""  # empty string → validate_plan will fail → replan fallback
 
-    # Strip accidental markdown fences
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        if raw.startswith("xml"):
-            raw = raw[3:]
-    raw = raw.strip()
- 
     return {
         **state,
         "rewoo_plan": raw,
@@ -217,29 +216,31 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
         query_state = query_state_from_dict(state.get("query_state", {}))
         candidates = state.get("candidate_destinations", ["IST", "LIS", "AMS"])
         dest_str = ",".join(candidates)
- 
-        steps = []
-        for i, t in enumerate(query_state.travellers, start=1):
+
+        steps = ['  <step id="1" tool="memory_read" />']
+        for i, t in enumerate(query_state.travellers, start=2):
             steps.append(
                 f'  <step id="{i}" tool="traveller_agent" '
                 f'traveller="{t.name}" origin="{t.origin_iata}" '
-                f'destinations="{dest_str}" />'
+                f'destinations="{dest_str}" depends_on="1" />'
             )
         n = len(query_state.travellers)
+        accom_id = n + 2
         steps.append(
-            f'  <step id="{n+1}" tool="accommodation_agent" '
-            f'destinations="{dest_str}" />'
+            f'  <step id="{accom_id}" tool="accommodation_agent" '
+            f'destinations="{dest_str}" depends_on="1" />'
         )
-        traveller_ids = ",".join(str(i) for i in range(1, n + 2))
+        traveller_ids = ",".join(str(i) for i in range(2, n + 2))
+        currency_id = accom_id + 1
         steps.append(
-            f'  <step id="{n+2}" tool="currency_agent" '
-            f'depends_on="{traveller_ids}" />'
+            f'  <step id="{currency_id}" tool="currency_agent" '
+            f'depends_on="{traveller_ids},{accom_id}" />'
         )
-        steps.append(
-            f'  <step id="{n+3}" tool="ranker_agent" '
-            f'depends_on="{n+2}" />'
-        )
- 
+        ranker_id = currency_id + 1
+        steps.append(f'  <step id="{ranker_id}" tool="ranker_agent" depends_on="{currency_id}" />')
+        write_id = ranker_id + 1
+        steps.append(f'  <step id="{write_id}" tool="memory_write" depends_on="{ranker_id}" />')
+
         fallback_plan = "<plan>\n" + "\n".join(steps) + "\n</plan>"
         return {
             **state,
@@ -251,198 +252,187 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
     # Re-call plan_node logic
     return {**state, "replan_count": replan_count, "rewoo_plan_valid": False}
 
-def execute_node(state: OrchestratorState) -> OrchestratorState:
+def _parse_steps(plan_xml: str) -> dict[str, ET.Element]:
+    """Returns {step_id: element} from the plan XML."""
+    root = ET.fromstring(plan_xml.strip())
+    return {s.get("id"): s for s in root.findall("step")}
+
+
+def _execution_order(steps: dict[str, ET.Element]) -> list[list[str]]:
     """
-    Node 4: Executes the plan.
-    Runs traveller agents, accommodation agent, currency agent.
-    Traveller agents run sequentially here (parallel via Send() in graph.py Step 14).
+    Topological sort respecting depends_on.
+    Returns groups of step IDs that can run in parallel.
     """
+    groups: list[list[str]] = []
+    completed: set[str] = set()
+    remaining = set(steps.keys())
+
+    while remaining:
+        ready = [
+            sid for sid in remaining
+            if all(
+                d.strip() in completed
+                for d in steps[sid].get("depends_on", "").split(",")
+                if d.strip()
+            )
+        ]
+        if not ready:
+            raise RuntimeError(f"Plan deadlock — unresolvable dependencies in steps: {remaining}")
+        groups.append(ready)
+        completed.update(ready)
+        remaining -= set(ready)
+
+    return groups
+
+
+def execute_node(state: dict) -> dict:
+    """
+    Parses rewoo_plan XML and executes every step in dependency order.
+    Handles all tools: memory_read, traveller_agent, accommodation_agent,
+    currency_agent, ranker_agent, memory_write.
+    Search steps are skipped automatically on a memory cache hit.
+    """
+    from src.agents.memory_agent import run_memory_read, run_memory_write
+
     query_state = query_state_from_dict(state.get("query_state", {}))
-    candidates = state.get("candidate_destinations", [])
-    # print(f"candidates {candidates}")
     errors = list(state.get("errors", []))
- 
-    # Build working state for sub-agents
-    sub_state = {
-        "candidate_destinations": candidates,
+
+    try:
+        steps = _parse_steps(state["rewoo_plan"])
+        order = _execution_order(steps)
+    except (ET.ParseError, RuntimeError) as exc:
+        errors.append(f"Plan execution aborted: {exc}")
+        return {**state, "errors": errors}
+
+    base_state = {
+        "candidate_destinations": state.get("candidate_destinations", []),
         "query_state": query_state,
         "episodic_memory": state.get("episodic_memory"),
         "semantic_memory": state.get("semantic_memory"),
     }
- 
-    # Run traveller agents (one per traveller)
-    all_flight_results = []
-    for traveller in query_state.travellers:
-        result = run_traveller_agent(sub_state, traveller)
-        all_flight_results.extend(result.get("flight_results", []))
-        errors.extend(result.get("errors", []))
- 
-    # Group flights by destination — one DestinationResult per destination iata
-    flights_by_dest: dict[str, list] = {}
-    for f in all_flight_results:
-        flights_by_dest.setdefault(f.destination_iata, []).append(f)
 
-    required_origins = {t.origin_iata for t in query_state.travellers}
-    destination_results = []
+    cache_hit = False
+    all_flight_results: list = []
+    accommodation_results: list = []
+    destination_results: list = []
+    exchange_rates: dict = {}
+    ranked_destinations: list = []
 
-    for iata, dest_flights in flights_by_dest.items():
-        # For region/anywhere mode, drop destinations not reachable by all travellers.
-        # For specific mode, keep them — the user asked for these explicitly.
-        if query_state.search_mode != "specific":
-            covered_origins = {f.origin_iata for f in dest_flights}
-            if not required_origins.issubset(covered_origins):
-                missing = required_origins - covered_origins
-                errors.append(f"{iata} dropped — no flights from: {missing}")
-                continue
+    SEARCH_TOOLS = {"traveller_agent", "accommodation_agent", "currency_agent", "ranker_agent", "memory_write"}
 
-        dest = DestinationResult(city=iata, iata=iata)
-        dest.flights = dest_flights
-        dest.total_flight_cost_usd = sum(
-            f.price_usd or f.price_local for f in dest_flights
-        )
-        destination_results.append(dest)
+    for group in order:
+        for sid in group:
+            step = steps[sid]
+            tool = step.get("tool")
 
-    # print(f"destination_results built from traveller output: {destination_results}")
- 
-    # Run accommodation agent
-    accom_state = {**sub_state, "destination_results": destination_results}
-    accom_result = run_accommodation_agent(accom_state)
-    accommodation_results = accom_result.get("accommodation_results", [])
- 
-    # Attach accommodation to each destination
-    accom_index = {a.destination_iata: a for a in accommodation_results}
-    for dest in destination_results:
-        accom = accom_index.get(dest.iata)
-        if accom:
-            dest.accommodation = accom
-            dest.total_accommodation_usd = accom.total_usd
-            dest.grand_total_usd = (
-                (dest.total_flight_cost_usd or 0.0) +
-                (dest.total_accommodation_usd or 0.0)
-            )
- 
-    # Run currency agent
-    currency_state = {
-        **sub_state,
-        "destination_results": destination_results,
-        "flight_results": all_flight_results,
-        "accommodation_results": accommodation_results,
-    }
-    currency_result = run_currency_agent(currency_state)
-    destination_results = currency_result.get("destination_results", destination_results)
-    exchange_rates = currency_result.get("exchange_rates", {})
- 
+            try:
+                if tool == "memory_read":
+                    result = run_memory_read({**state, **base_state})
+                    state = {**state, **result}
+                    cache_hit = state.get("episodic_cache_hit", False)
+                    if cache_hit:
+                        ranked_destinations = state.get("ranked_destinations", [])
+                    errors.extend(result.get("errors", []))
+
+                elif cache_hit and tool in SEARCH_TOOLS:
+                    continue  # cached results already in state
+
+                elif tool == "traveller_agent":
+                    traveller_name = step.get("traveller")
+                    destinations = [d.strip() for d in step.get("destinations", "").split(",") if d.strip()]
+                    traveller = next((t for t in query_state.travellers if t.name == traveller_name), None)
+                    if traveller is None:
+                        errors.append(f"Plan step {sid}: traveller '{traveller_name}' not found")
+                        continue
+                    result = run_traveller_agent(
+                        {**base_state, "candidate_destinations": destinations or base_state["candidate_destinations"]},
+                        traveller,
+                    )
+                    all_flight_results.extend(result.get("flight_results", []))
+                    errors.extend(result.get("errors", []))
+
+                elif tool == "accommodation_agent":
+                    destinations = [d.strip() for d in step.get("destinations", "").split(",") if d.strip()]
+                    result = run_accommodation_agent(
+                        {**base_state,
+                         "candidate_destinations": destinations or base_state["candidate_destinations"],
+                         "destination_results": []}
+                    )
+                    accommodation_results = result.get("accommodation_results", [])
+                    errors.extend(result.get("errors", []))
+
+                elif tool == "currency_agent":
+                    flights_by_dest: dict[str, list] = {}
+                    for f in all_flight_results:
+                        flights_by_dest.setdefault(f.destination_iata, []).append(f)
+
+                    required_origins = {t.origin_iata for t in query_state.travellers}
+                    destination_results = []
+                    for iata, dest_flights in flights_by_dest.items():
+                        if query_state.search_mode != "specific":
+                            covered = {f.origin_iata for f in dest_flights}
+                            if not required_origins.issubset(covered):
+                                errors.append(f"{iata} dropped — no flights from: {required_origins - covered}")
+                                continue
+                        dest = DestinationResult(city=iata, iata=iata)
+                        dest.flights = dest_flights
+                        dest.total_flight_cost_usd = sum(f.price_usd or f.price_local for f in dest_flights)
+                        destination_results.append(dest)
+
+                    accom_index = {a.destination_iata: a for a in accommodation_results}
+                    for dest in destination_results:
+                        accom = accom_index.get(dest.iata)
+                        if accom:
+                            dest.accommodation = accom
+                            dest.total_accommodation_usd = accom.total_usd
+                            dest.grand_total_usd = (dest.total_flight_cost_usd or 0.0) + (accom.total_usd or 0.0)
+
+                    result = run_currency_agent({
+                        **base_state,
+                        "destination_results": destination_results,
+                        "flight_results": all_flight_results,
+                        "accommodation_results": accommodation_results,
+                    })
+                    destination_results = result.get("destination_results", destination_results)
+                    exchange_rates = result.get("exchange_rates", {})
+                    errors.extend(result.get("errors", []))
+
+                elif tool == "ranker_agent":
+                    rank_result = run_ranker_agent({"destination_results": destination_results})
+                    ranked_destinations = rank_result.get("ranked_destinations", [])
+
+                elif tool == "memory_write":
+                    result = run_memory_write({
+                        **state,
+                        "destination_results": destination_results,
+                        "flight_results": all_flight_results,
+                        "accommodation_results": accommodation_results,
+                        "exchange_rates": exchange_rates,
+                        "ranked_destinations": ranked_destinations,
+                    })
+                    errors.extend(result.get("errors", []))
+
+            except Exception as exc:
+                errors.append(f"Step {sid} ({tool}) failed: {exc}")
+
     return {
         **state,
         "destination_results": destination_results,
         "flight_results": all_flight_results,
         "accommodation_results": accommodation_results,
         "exchange_rates": exchange_rates,
+        "ranked_destinations": ranked_destinations,
         "errors": errors,
     }
 
-def solve_node(state: OrchestratorState) -> OrchestratorState:
-    """
-    Node 5: Runs the ranker agent and returns ranked destinations.
-    """
-    rank_result = run_ranker_agent({
-        "destination_results": state.get("destination_results", []),
-    })
- 
-    return {
-        **state,
-        "ranked_destinations": rank_result.get("ranked_destinations", []),
-    }
- 
- # ── Conditional edges ─────────────────────────────────────────
- 
-def plan_valid(state: OrchestratorState) -> Literal["execute", "replan"]:
-    if state.get("rewoo_plan_valid"):
-        return "execute"
-    return "replan"
- 
- 
-def replan_or_execute(state: OrchestratorState) -> Literal["plan", "execute"]:
-    """After replan node — re-call plan or force execute with fallback."""
-    if state.get("rewoo_plan_valid"):
-        return "execute"
-    if state.get("replan_count", 0) >= 2:
+
+# ── Conditional edges ─────────────────────────────────────────
+
+def plan_valid(state: dict) -> Literal["execute", "replan"]:
+    return "execute" if state.get("rewoo_plan_valid") else "replan"
+
+
+def replan_or_execute(state: dict) -> Literal["plan", "execute"]:
+    if state.get("rewoo_plan_valid") or state.get("replan_count", 0) >= 2:
         return "execute"
     return "plan"
-
-
-# ── Build graph ───────────────────────────────────────────────
- 
-def build_orchestrator_graph():
-    graph = StateGraph(OrchestratorState)
- 
-    graph.add_node("plan",          plan_node)
-    graph.add_node("validate_plan", validate_plan_node)
-    graph.add_node("replan",        replan_node)
-    graph.add_node("execute",       execute_node)
-    graph.add_node("solve",         solve_node)
- 
-    graph.add_edge(START, "plan")
-    graph.add_edge("plan", "validate_plan")
-    graph.add_conditional_edges(
-        "validate_plan",
-        plan_valid,
-        {"execute": "execute", "replan": "replan"},
-    )
-    graph.add_conditional_edges(
-        "replan",
-        replan_or_execute,
-        {"plan": "plan", "execute": "execute"},
-    )
-    graph.add_edge("execute", "solve")
-    graph.add_edge("solve",   END)
- 
-    return graph.compile()
- 
- 
-orchestrator_agent = build_orchestrator_graph()
-try:
-    orchestrator_agent.get_graph().draw_mermaid_png(
-        output_file_path="orchestrator_agent.png"
-    )
-    print("\nGraph saved as orchestrator_agent.png")
-except Exception as e:
-    print(f"\nCould not save PNG: {e}")
-
-
-# ── Entry point ───────────────────────────────────────────────
- 
-def run_orchestrator(state: dict) -> dict:
-    """
-    Entry point for the main travel agent graph.
-    Runs full ReWOO plan → execute → solve cycle.
-    """
-    # print(f"Running orchestrator with initial state: {state}")  # Debug print
-    result = orchestrator_agent.invoke({
-        "query_state":               state.get("query_state", {}),
-        "semantic_memory":           state.get("semantic_memory"),
-        "episodic_memory":           state.get("episodic_memory"),
-        "prioritised_destinations":  state.get("prioritised_destinations", []),
-        "rewoo_plan":                None,
-        "rewoo_plan_valid":          False,
-        "replan_count":              0,
-        "candidate_destinations":    [],
-        "destination_results":       [],
-        "flight_results":            [],
-        "accommodation_results":     [],
-        "exchange_rates":            {},
-        "ranked_destinations":       [],
-        "errors":                    [],
-    })
- 
-    return {
-        "query_state":             query_state_to_dict(query_state_from_dict(state.get("query_state", {}))),
-        "candidate_destinations":  result.get("candidate_destinations", []),
-        "destination_results":     result.get("destination_results", []),
-        "ranked_destinations":     result.get("ranked_destinations", []),
-        "flight_results":          result.get("flight_results", []),
-        "accommodation_results":   result.get("accommodation_results", []),
-        "exchange_rates":          result.get("exchange_rates", {}),
-        "rewoo_plan":              result.get("rewoo_plan"),
-        "errors":                  result.get("errors", []),
-    }

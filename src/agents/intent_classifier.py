@@ -10,7 +10,7 @@ from src.utils.config import llm
 from data.iata import resolve_iata
 
 load_dotenv()
-MAX_ELICITATION_TURNS = int(os.getenv("MAX_ELICITATION_TURNS", 5))
+MAX_ELICITATION_TURNS = int(os.getenv("MAX_ELICITATION_TURNS", 3))
 
 
 class IntakeState(dict):
@@ -41,7 +41,7 @@ def _parse(raw: str) -> dict | None:
 
 
 def _merge(query_state: QueryState, fields: dict) -> QueryState:
-    # print(f"Merging the travellers: {query_state.travellers} on _merge")
+ 
     existing = {t.origin_city.lower() for t in query_state.travellers}
     for traveller in fields.get("travellers", []):
         origin = traveller.get("origin_city", "")
@@ -64,7 +64,10 @@ def _merge(query_state: QueryState, fields: dict) -> QueryState:
         query_state.duration_nights = fields["duration_nights"]
     if fields.get("region_preferences") and not query_state.region_preferences:
         query_state.region_preferences = fields["region_preferences"]
-    # print(f"Merged query state: {query_state} with new fields: {fields} on _merge")
+    if fields.get("search_mode") and not query_state.search_mode:
+        query_state.search_mode = fields["search_mode"]
+    if fields.get("destination_locations") and not query_state.destination_locations:
+        query_state.destination_locations = fields["destination_locations"]
     return query_state
 
 
@@ -73,9 +76,10 @@ def _merge(query_state: QueryState, fields: dict) -> QueryState:
 
 def classify_node(state: IntakeState) -> IntakeState:
     raw = llm.invoke(build_intent_classifier_prompt(state["user_message"], state.get("query_state")) ).content.strip()
-
     result = _parse(raw) or {"status": "NEEDS_INFO", "detected_fields": {}}
+
     status = result.get("status", "NEEDS_INFO")
+
     query_state = _merge(query_state_from_dict(state.get("query_state", {})), result.get("detected_fields", {}))
 
     agent_response = None
@@ -86,8 +90,7 @@ def classify_node(state: IntakeState) -> IntakeState:
             f"I help groups of 1–5 people flying from different cities "
             f"find the cheapest destination to meet."
         )
-    # print(f"Classify node result: status={status}, query_state={query_state}, agent_response={agent_response} on classify_node with raw={raw}")
-
+  
     return {
         **state,
         "query_state": query_state_to_dict(query_state),
@@ -98,6 +101,7 @@ def classify_node(state: IntakeState) -> IntakeState:
 
 
 def elicit_node(state: IntakeState) -> IntakeState:
+    
     query_state = query_state_from_dict(state.get("query_state", {}))
     history = state.get("conversation_history", [])
     turn_count = state.get("turn_count", 0) + 1
@@ -105,7 +109,7 @@ def elicit_node(state: IntakeState) -> IntakeState:
     raw = llm.invoke(build_elicitation_prompt(state["user_message"], query_state, history)).content.strip()
 
     result = _parse(raw)
-    # print(f"Raw elicit node output: {raw} on elicit_node")
+
     if result:
         query_state = _merge(query_state, result.get("updated_fields", {}))
         complete = _all_required_present(query_state)
@@ -120,8 +124,8 @@ def elicit_node(state: IntakeState) -> IntakeState:
         new_history.append({"role": "user", "content": state["user_message"]})
     if question:
         new_history.append({"role": "assistant", "content": question})
-
-    # print(f"Elicit node result: query_state={query_state}, question={question}, complete={complete}, turn_count={turn_count} on elicit_node with raw={raw}")
+    
+    test = IntentStatus.READY if complete else state.get("intent_status")
 
     return {
         **state,
@@ -138,8 +142,12 @@ def elicit_node(state: IntakeState) -> IntakeState:
 # ── Routing ───────────────────────────────────────────────────
 
 def route_after_classify(state: IntakeState) -> Literal["elicit", "end"]:
-    # print(f"Routing after classify with intent_status={state.get('intent_status')} on route_after_classify")
-    if state.get("intent_status") == IntentStatus.NEEDS_INFO:
+
+    if (
+        state.get("intent_status") == IntentStatus.NEEDS_INFO
+        and not state.get("turn_limit_reached")
+        and not state.get("elicitation_complete")
+    ):
         return "elicit"
     return "end"
 

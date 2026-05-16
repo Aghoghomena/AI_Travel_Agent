@@ -1,8 +1,9 @@
 from __future__ import annotations
 from typing import Annotated, Any
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum 
 import operator
+from typing import TypedDict
 
 
 
@@ -154,7 +155,7 @@ class QueryState:
 # ─────────────────────────────────────────
 # Main graph state
 # ─────────────────────────────────────────
-class TravelAgentState:
+class TravelAgentState2:
     """Encapsulates the entire state of the travel agent, including the current query and any HITL checkpoints."""
     session_id: str
     conversation_history:  Annotated[list[dict], operator.add]
@@ -199,6 +200,42 @@ class TravelAgentState:
 
     # ── Errors ────────────────────────────────────────────
     errors: Annotated[list[str], operator.add]
+
+
+
+class TravelAgentState(TypedDict, total=False):
+    session_id: str
+    conversation_history: list[dict]
+    user_message: str
+    agent_response: str | None
+    intent_status: str | None
+    out_of_scope_reason: str | None
+    query_state: dict
+    elicitation_question: str | None
+    elicitation_complete: bool
+    turn_count: int
+    turn_limit_reached: bool
+    search_status: str | None
+    flight_results: list
+    accommodation_results: list
+    exchange_rates: dict
+    destination_results: list
+    ranked_destinations: list
+    activity_destinations: list
+    activities: dict
+    activities_fetched: bool
+    episodic_cache_hit: bool
+    cached_result_date: str | None
+    memory_write_complete: bool
+    hitl_checkpoint_1: dict | None
+    hitl_checkpoint_2: dict | None
+    hitl_1_confirmed: bool
+    awaiting_hitl: bool
+    rewoo_plan: str | None
+    rewoo_plan_valid: bool
+    current_step: str | None
+    past_searches_summary: str | None
+    errors: list
 
 
 # ─────────────────────────────────────────

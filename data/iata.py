@@ -376,14 +376,53 @@ CITY_CENTRES: dict[str, tuple[float, float]] = {
     # Europe
     "DUB": (53.3498,  -6.2603),   # Dublin
     "LHR": (51.5074,  -0.1278),   # London
+    "LGW": (51.5074,  -0.1278),   # London Gatwick
+    "STN": (51.5074,  -0.1278),   # London Stansted
     "AMS": (52.3676,   4.9041),   # Amsterdam
     "LIS": (38.7169,  -9.1399),   # Lisbon
     "IST": (41.0082,  28.9784),   # Istanbul
     "CDG": (48.8566,   2.3522),   # Paris
+    "ORY": (48.8566,   2.3522),   # Paris Orly
     "FCO": (41.9028,  12.4964),   # Rome
+    "CIA": (41.9028,  12.4964),   # Rome Ciampino
     "BER": (52.5200,  13.4050),   # Berlin
     "CPH": (55.6761,  12.5683),   # Copenhagen
     "ARN": (59.3293,  18.0686),   # Stockholm
+    "EDI": (55.9533,  -3.1883),   # Edinburgh
+    "GLA": (55.8642,  -4.2518),   # Glasgow
+    "MAD": (40.4168,  -3.7038),   # Madrid
+    "BCN": (41.3851,   2.1734),   # Barcelona
+    "MXP": (45.4654,   9.1859),   # Milan Malpensa
+    "LIN": (45.4654,   9.1859),   # Milan Linate
+    "VIE": (48.2082,  16.3738),   # Vienna
+    "ZRH": (47.3769,   8.5417),   # Zurich
+    "BRU": (50.8503,   4.3517),   # Brussels
+    "PRG": (50.0755,  14.4378),   # Prague
+    "WAW": (52.2297,  21.0122),   # Warsaw
+    "BUD": (47.4979,  19.0402),   # Budapest
+    "ATH": (37.9838,  23.7275),   # Athens
+    "HEL": (60.1699,  24.9384),   # Helsinki
+    "OSL": (59.9139,  10.7522),   # Oslo
+    "LJU": (46.0569,  14.5058),   # Ljubljana
+    "DUB": (53.3498,  -6.2603),   # Dublin
+    "MAN": (53.4808,  -2.2426),   # Manchester
+    "BRS": (51.4545,  -2.5879),   # Bristol
+    "PMI": (39.5696,   2.6502),   # Palma Mallorca
+    "AGP": (36.7213,  -4.4214),   # Malaga
+    "ALC": (38.3452,  -0.4815),   # Alicante
+    "OPO": (41.1496,  -8.6110),   # Porto
+    "NCE": (43.7102,   7.2620),   # Nice
+    "MRS": (43.2965,   5.3698),   # Marseille
+    "LYS": (45.7640,   4.8357),   # Lyon
+    "TLS": (43.6047,   1.4442),   # Toulouse
+    "BLL": (55.7080,   9.5356),   # Billund (Denmark)
+    "RIX": (56.9460,  24.1059),   # Riga
+    "TLL": (59.4370,  24.7536),   # Tallinn
+    "VNO": (54.6872,  25.2797),   # Vilnius
+    "SOF": (42.6977,  23.3219),   # Sofia
+    "OTP": (44.4268,  26.1025),   # Bucharest
+    "SKG": (40.6401,  22.9444),   # Thessaloniki
+
     # Africa
     "LOS": ( 6.5244,   3.3792),   # Lagos
     "ABV": ( 9.0579,   7.4951),   # Abuja
@@ -394,14 +433,48 @@ CITY_CENTRES: dict[str, tuple[float, float]] = {
     "RAK": (31.6295,  -7.9811),   # Marrakech
     "DKR": (14.7167, -17.4677),   # Dakar
     "ADD": ( 9.0320,  38.7469),   # Addis Ababa
-    "CPT": (-33.9249,  18.4241),  # Cape Town
-    "JNB": (-26.2041,  28.0473),  # Johannesburg
+    "CPT": (-33.9249, 18.4241),   # Cape Town
+    "JNB": (-26.2041, 28.0473),   # Johannesburg
     "DAR": (-6.7924,  39.2083),   # Dar es Salaam
     "KGL": (-1.9441,  30.0619),   # Kigali
     "EBB": ( 0.3136,  32.5811),   # Kampala
     "TUN": (36.8065,  10.1815),   # Tunis
     "ALG": (36.7372,   3.0865),   # Algiers
+    "LUN": (-15.4167, 28.2833),   # Lusaka
+    "HRE": (-17.8292, 31.0522),   # Harare
+    "MRU": (-20.1609, 57.4989),   # Mauritius
+    "TNR": (-18.9137, 47.5361),   # Antananarivo
+    "ABJ": ( 5.3600,  -4.0083),   # Abidjan
+    "COO": ( 6.3654,   2.4183),   # Cotonou
+    "LFW": ( 6.1375,   1.2544),   # Lomé
+    "BKO": (12.6392,  -8.0029),   # Bamako
+    "OUA": (12.3647,  -1.5332),   # Ouagadougou
+    "DLA": ( 4.0511,   9.7679),   # Douala
+    "NSI": ( 3.8480,  11.5021),   # Yaoundé
+    "FIH": (-4.3276,  15.3222),   # Kinshasa
+    "LAD": (-8.8147,  13.2302),   # Luanda
+
+    # Middle East
+    "DXB": (25.2048,  55.2708),   # Dubai
+    "AUH": (24.4539,  54.3773),   # Abu Dhabi
+    "DOH": (25.2854,  51.5310),   # Doha
+    "AMM": (31.9522,  35.9333),   # Amman
+    "BEY": (33.8938,  35.5018),   # Beirut
+    "TLV": (32.0853,  34.7818),   # Tel Aviv
+    "KWI": (29.3759,  47.9774),   # Kuwait City
+    "BAH": (26.2154,  50.5832),   # Bahrain
+
+    # Asia
+    "BKK": (13.7563, 100.5018),   # Bangkok
+    "SIN": ( 1.3521, 103.8198),   # Singapore
+    "KUL": ( 3.1390, 101.6869),   # Kuala Lumpur
+    "HKG": (22.3193, 114.1694),   # Hong Kong
+    "NRT": (35.6762, 139.6503),   # Tokyo
+    "ICN": (37.5665, 126.9780),   # Seoul
+    "DEL": (28.6139,  77.2090),   # Delhi
+    "BOM": (19.0760,  72.8777),   # Mumbai
 }
+
 
 # Activity types to search for
 INCLUDED_TYPES = [

@@ -181,6 +181,7 @@ def hitl_2_node(state: dict) -> dict:
         "hitl_checkpoint_2": checkpoint,
         "activity_destinations": activity_destinations,
         "awaiting_hitl": False,
+        "ranked_destinations":   ranked,
         "query_state": state.get("query_state"),
     }
 

@@ -30,8 +30,8 @@ def get_activities(destination_iata: str) -> list[Activity]:
     """
     coords = CITY_CENTRES.get(destination_iata.upper())
     if not coords:
-        print(f"[places] No coordinates for {destination_iata}")
-        return []
+        print(f"[places] No coordinates for {destination_iata} so use Paris")
+        coords = (48.8566, 2.3522)  # Paris as geographic centre fallback
  
     lat, lng = coords
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "")

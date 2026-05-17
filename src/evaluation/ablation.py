@@ -25,13 +25,16 @@ from dataclasses import dataclass, field
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _CountingLLM:
-    """Wraps any LangChain LLM and counts invocations."""
+    # Wraps your real LLM and intercepts every call so we can count how many
+    # times it was invoked and how long each call took. Used to compare
+    # ReWOO (should be 1 call) vs ReAct (1 call per step).
     def __init__(self, llm):
         self._llm = llm
         self.call_count = 0
         self.total_ms   = 0.0
 
     def invoke(self, prompt, **kwargs):
+        # Forwards the call to the real LLM, records the time taken, and increments the counter.
         start = time.perf_counter()
         result = self._llm.invoke(prompt, **kwargs)
         self.total_ms += (time.perf_counter() - start) * 1000
@@ -39,12 +42,15 @@ class _CountingLLM:
         return result
 
     def reset(self):
+        # Resets counters between ReWOO and ReAct runs so they don't bleed into each other.
         self.call_count = 0
         self.total_ms   = 0.0
 
 
 def _build_rewoo_state(n_travellers: int) -> dict:
-    """Build a minimal OrchestratorState for plan generation."""
+    # Builds a fake orchestrator state with N synthetic travellers (Alice, Ben, etc.)
+    # so we can run the planner without needing real user input. Always uses September,
+    # 7 nights, anywhere mode — just enough to trigger a real plan.
     from src.state import Traveller, QueryState, query_state_to_dict
     names  = ["Alice", "Ben", "Cara", "Dan", "Eve"]
     iatas  = ["DUB",  "LOS", "LHR",  "NBO", "ACC"]
@@ -75,10 +81,9 @@ def _build_rewoo_state(n_travellers: int) -> dict:
 
 
 def _run_rewoo(state: dict, counting_llm: _CountingLLM) -> dict:
-    """
-    ReWOO: 1 LLM call generates the full plan upfront.
-    Plan is validated before any tools execute.
-    """
+    # Runs the real orchestrator with the counting LLM swapped in.
+    # ReWOO generates the entire execution plan in a single LLM call upfront,
+    # then validates it — no LLM is called again during tool execution.
     import src.agents.orchestrator as orch
     original_llm = orch.llm
     orch.llm = counting_llm
@@ -91,11 +96,10 @@ def _run_rewoo(state: dict, counting_llm: _CountingLLM) -> dict:
 
 
 def _run_react(state: dict, counting_llm: _CountingLLM) -> dict:
-    """
-    Minimal ReAct baseline: calls the LLM once per tool-step decision.
-    No upfront plan — the LLM decides the next tool after each observation.
-    Returns a simulated execution trace showing the call pattern.
-    """
+    # Simulates how a ReAct agent would behave: no upfront plan, just ask the LLM
+    # "what tool should I call next?" after every single step. For N travellers this
+    # means N+5 LLM calls (memory_read + N traveller agents + accommodation + currency + ranker + memory_write).
+    # Returns a trace of what the LLM decided at each step.
     from src.state import query_state_from_dict
     from src.utils.config import llm as real_llm
 
@@ -111,9 +115,9 @@ def _run_react(state: dict, counting_llm: _CountingLLM) -> dict:
     )
 
     prompt_template = """You are a ReAct agent for group travel search.
-Observation so far: {obs}
-Available tools: memory_read, traveller_agent, accommodation_agent, currency_agent, ranker_agent, memory_write
-What is the NEXT single tool to call? Reply with just the tool name."""
+                Observation so far: {obs}
+                Available tools: memory_read, traveller_agent, accommodation_agent, currency_agent, ranker_agent, memory_write
+                What is the NEXT single tool to call? Reply with just the tool name."""
 
     observation = "Starting group travel search."
     trace = []
@@ -141,12 +145,9 @@ class ReWOOAblationResult:
 
 
 def run_rewoo_ablation(traveller_counts: list[int] | None = None) -> list[ReWOOAblationResult]:
-    """
-    Compares ReWOO vs ReAct across different traveller counts.
-
-    ReWOO makes 1 LLM call for the full plan.
-    ReAct makes 1 LLM call per step (memory_read + N travellers + accom + currency + ranker + write).
-    """
+    # The main ReWOO vs ReAct comparison. Runs both approaches for each traveller count
+    # (1 through 5 by default), measures LLM call count and time for each, then prints
+    # a table showing how many fewer calls ReWOO needed and the % improvement.
     from src.utils.config import llm as base_llm
 
     if traveller_counts is None:
@@ -155,11 +156,11 @@ def run_rewoo_ablation(traveller_counts: list[int] | None = None) -> list[ReWOOA
     results: list[ReWOOAblationResult] = []
     counting = _CountingLLM(base_llm)
 
-    print(f"\n{'─'*64}")
-    print(f"  {'Ablation: ReWOO vs ReAct':^60}")
-    print(f"{'─'*64}")
-    print(f"  {'Travellers':<14}{'ReWOO calls':<15}{'ReAct calls':<15}{'Call reduction':<16}{'ReWOO valid'}")
-    print(f"  {'─'*12}  {'─'*12}  {'─'*12}  {'─'*12}  {'─'*10}")
+    print("\nReWOO vs ReAct — LLM call comparison")
+    print("How many times does the LLM get called for each approach?\n")
+    print(f"  {'Travellers':<16} {'ReWOO':>6} {'ReAct':>6} {'Saved':>7} {'Plan OK':>9}")
+    print(f"  {'(# of people)':<16} {'calls':>6} {'calls':>6} {'calls':>7} {'valid?':>9}")
+    print("  " + "─" * 48)
 
     for n in traveller_counts:
         state = _build_rewoo_state(n)
@@ -194,24 +195,14 @@ def run_rewoo_ablation(traveller_counts: list[int] | None = None) -> list[ReWOOA
         )
         results.append(r)
 
-        _G = "\033[32m"; _R = "\033[31m"; _X = "\033[0m"
-        valid_str = f"{_G}✓{_X}" if rewoo_valid else f"{_R}✗{_X}"
-        reduction_color = _G if call_reduction >= 50 else ""
-        print(
-            f"  {n:<14}"
-            f"{rewoo_calls:<15}"
-            f"{react_calls:<15}"
-            f"{reduction_color}{call_reduction:>6.1f}%{_X}         "
-            f"{valid_str}"
-        )
+        ok = "yes" if rewoo_valid else "NO"
+        print(f"  {f'{n} traveller(s)':<16} {rewoo_calls:>6} {react_calls:>6} {call_reduction:>6.0f}%  {ok:>9}")
 
-    # Summary
     avg_reduction = sum(r.call_reduction for r in results) / len(results)
-    print(f"{'─'*64}")
-    print(f"  Average LLM call reduction: \033[32m{avg_reduction:.1f}%\033[0m")
-    print(f"\n  Interpretation: ReWOO generates the complete execution plan in ONE")
-    print(f"  LLM call. ReAct requires N+5 calls (one per step). For 5 travellers")
-    print(f"  ReWOO uses {results[-1].rewoo_llm_calls} call vs ReAct's {results[-1].react_llm_calls} calls — a {results[-1].call_reduction:.0f}% reduction.")
+    print("  " + "─" * 48)
+    print(f"\n  Average LLM calls saved: {avg_reduction:.0f}%")
+    print(f"  ReWOO plans the whole trip in 1 call.")
+    print(f"  ReAct asks the LLM what to do at every single step.")
     print()
 
     return results

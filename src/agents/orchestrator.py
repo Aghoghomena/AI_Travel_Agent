@@ -165,7 +165,7 @@ def plan_node(state: OrchestratorState) -> OrchestratorState:
         user_feedback=state.get("hitl_plan_feedback"),
     )
 
-    print(f"\n {candidates} \n")
+    # print(f"\n {candidates} \n")
  
     try:
         response = llm.invoke(prompt)
@@ -208,7 +208,7 @@ def validate_plan_node(state: OrchestratorState) -> OrchestratorState:
         candidates=state.get("candidate_destinations", []),
     )
 
-    print(f"[validate_plan_node] is_valid={is_valid}, error_msg='{error_msg}'")
+    # print(f"[validate_plan_node] is_valid={is_valid}, error_msg='{error_msg}'")
 
     return {
         **state,
@@ -230,13 +230,13 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
 
     # HITL-driven replan: LLM updates the existing plan with user feedback
     hitl_feedback = state.get("hitl_plan_feedback")
-    print(f"the hitl feedback {hitl_feedback}")
+    # print(f"the hitl feedback {hitl_feedback}")
     current_plan = state.get("rewoo_plan", "")
     if hitl_feedback and current_plan:
         try:
             prompt = build_replan_prompt(current_plan, hitl_feedback)
             response = llm.invoke(prompt)
-            print(f"\n the replanned output {response} \n")
+            # print(f"\n the replanned output {response} \n")
             raw = response.content.strip()
             if raw.startswith("```"):
                 parts = raw.split("```")
@@ -244,7 +244,7 @@ def replan_node(state: OrchestratorState) -> OrchestratorState:
                 if raw.startswith("xml"):
                     raw = raw[3:]
             raw = raw.strip()
-            print(f"\n the replanned output {response} \n")
+            # print(f"\n the replanned output {response} \n")
 
             # Extract the updated destination list from the new plan XML
             updated_candidates = _extract_destinations_from_plan(raw)

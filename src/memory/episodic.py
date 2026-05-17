@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from src.memory.db import get_db_connection
 from src.state import FlightResult, AccommodationResult
 import os
@@ -29,7 +29,7 @@ class EpisodicMemory:
         row = cursor.execute("""
             SELECT * FROM flights
             WHERE origin_iata = ? AND destination_iata = ? AND outbound_date = ? AND expires_at > ?
-        """, (origin_iata, destination_iata, outbound_date, datetime.utcnow())).fetchone()
+        """, (origin_iata, destination_iata, outbound_date, datetime.now(timezone.utc).isoformat())).fetchone()
         conn.close()
         if row:
                 return FlightResult(
@@ -37,6 +37,7 @@ class EpisodicMemory:
                     destination_iata=destination_iata,
                     price_local=row["price_local"],
                     currency=row["currency"],
+                    avg_cost_per_night=0,
                     price_usd=row["price_usd"],
                     fetched_at=row["fetched_at"],
                     from_cache=True
@@ -47,7 +48,7 @@ class EpisodicMemory:
         """Inserts or updates a flight leg result in the cache."""
         conn = get_db_connection()
         cursor = conn.cursor()
-        expires_at = datetime.utcnow() + timedelta(hours=ttl_hours([result.currency]))
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours([result.currency]))
         outbound_date = result.outbound_flights[0] if isinstance(result.outbound_flights, list) and result.outbound_flights else ""
         cursor.execute("""
             INSERT INTO flights (origin_iata, destination_iata, outbound_date, price_local, currency, price_usd, fetched_at, expires_at)
@@ -80,7 +81,7 @@ class EpisodicMemory:
         cursor = conn.cursor()
         origins_key = sort_origins_key(origins)
         query = "SELECT * FROM episodic_searches WHERE origins_key = ? AND duration_nights = ? AND expires_at > ? "
-        params: list = [origins_key, duration_nights, datetime.utcnow()]
+        params: list = [origins_key, duration_nights, datetime.now(timezone.utc).isoformat()]
 
         if destinations:
             query += " AND destinations = ?"
@@ -119,7 +120,7 @@ class EpisodicMemory:
     def set_group_search(self,origins: list[str],destination: str,outbound_date: str,return_date: str,duration_nights: int,flights: list[FlightResult],accommodation: AccommodationResult,total_usd: float,exchange_rates: dict,activities: list | None = None, region_preferences="") -> None:
         """Stores a complete group search result in memory."""
         key = sort_origins_key(origins)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         currencies = [f.currency for f in flights]
         ttl = ttl_hours(currencies)
         expires = (now + timedelta(hours=ttl)).isoformat()
